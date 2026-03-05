@@ -6,10 +6,12 @@ name: Tests
 on:
   pull_request:
     paths-ignore:
-      - 'README.md'
+      - '**/*.md'
+      - '.github/workflows/*.yml'
   push:
     paths-ignore:
-      - 'README.md'
+      - '**/*.md'
+      - '.github/workflows/*.yml'
 
 # Testing only needs permissions to read the repository contents.
 permissions:
@@ -58,6 +60,7 @@ jobs:
     name: 'Acceptance Tests: Terraform ${{ matrix.terraform }}'
     needs: build
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     timeout-minutes: 15
     strategy:
       fail-fast: false
