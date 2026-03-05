@@ -1,4 +1,4 @@
-resource "datadog_notebook" "example" {
+resource "datadoggy_notebook" "example" {
   name = "Example Service Runbook"
   type = "runbook"
 
@@ -22,5 +22,5 @@ resource "datadog_notebook" "example" {
 }
 
 output "notebook_id" {
-  value = datadog_notebook.example.id
+  value = datadoggy_notebook.example.id
 }

@@ -13,7 +13,7 @@ import (
 
 // testAccProtoV6ProviderFactories is used to instantiate a provider during acceptance testing.
 var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, error){
-	"datadog": providerserver.NewProtocol6WithError(New("test")()),
+	"datadoggy": providerserver.NewProtocol6WithError(New("test")()),
 }
 
 // testAccPreCheck verifies that the required Datadog credentials are set.

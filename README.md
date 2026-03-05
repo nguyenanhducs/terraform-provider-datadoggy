@@ -1,6 +1,6 @@
 # Datadog Notebook Terraform Provider
 
-The official `DataDog/datadog` Terraform provider exposes most Datadog resources but omits the Notebooks. This provider implements the `datadog_notebook` resource so notebooks can be managed as infrastructure-as-code alongside the rest of your Datadog setup.
+The official `DataDog/datadog` Terraform provider exposes most Datadog resources but omits the Notebooks. This provider implements the `datadoggy_notebook` resource so notebooks can be managed as infrastructure-as-code alongside the rest of your Datadog setup.
 
 ## Requirements
 
@@ -14,14 +14,14 @@ The official `DataDog/datadog` Terraform provider exposes most Datadog resources
 ```hcl
 terraform {
   required_providers {
-    datadog-notebook = {
-      source  = "nguyenanhducs/datadog-notebook"
+    datadoggy = {
+      source  = "nguyenanhducs/datadoggy"
       version = "~> 0.1"
     }
   }
 }
 
-provider "datadog-notebook" {
+provider "datadoggy" {
   # Credentials can be omitted if DD_API_KEY and DD_APP_KEY env vars are set.
   api_key = var.datadog_api_key
   app_key = var.datadog_app_key
@@ -31,7 +31,7 @@ provider "datadog-notebook" {
 ### Creating a notebook
 
 ```hcl
-resource "datadog_notebook" "service_runbook" {
+resource "datadoggy_notebook" "service_runbook" {
   name = "My Service Runbook"
   type = "runbook"
 
@@ -53,14 +53,14 @@ resource "datadog_notebook" "service_runbook" {
 }
 
 output "notebook_id" {
-  value = datadog_notebook.service_runbook.id
+  value = datadoggy_notebook.service_runbook.id
 }
 ```
 
 ### Importing an existing notebook
 
 ```shell
-terraform import datadog_notebook.example <notebook_id>
+terraform import datadoggy_notebook.example <notebook_id>
 ```
 
 ## Environment variables
@@ -75,6 +75,6 @@ terraform import datadog_notebook.example <notebook_id>
 
 | Resource           | Description                                    |
 |--------------------|------------------------------------------------|
-| `datadog_notebook` | Manages a Datadog Notebook (CRUD + import)     |
+| `datadoggy_notebook` | Manages a Datadog Notebook (CRUD + import)     |
 
 See [`docs/resources/notebook.md`](docs/resources/notebook.md) for the full schema reference.

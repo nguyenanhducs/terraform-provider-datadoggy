@@ -45,7 +45,7 @@ type DatadogClients struct {
 
 // Metadata returns the provider type name and version.
 func (p *DatadogProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
-	resp.TypeName = "datadog"
+	resp.TypeName = "datadoggy"
 	resp.Version = p.version
 }
 
