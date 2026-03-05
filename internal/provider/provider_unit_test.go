@@ -15,8 +15,8 @@ func TestDatadogProviderMetadata(t *testing.T) {
 	req := fwprovider.MetadataRequest{}
 	resp := &fwprovider.MetadataResponse{}
 	p.Metadata(context.Background(), req, resp)
-	if resp.TypeName != "datadog" {
-		t.Errorf("expected TypeName 'datadog', got %q", resp.TypeName)
+	if resp.TypeName != "datadoggy" {
+		t.Errorf("expected TypeName 'datadoggy', got %q", resp.TypeName)
 	}
 	if resp.Version != "test" {
 		t.Errorf("expected Version 'test', got %q", resp.Version)

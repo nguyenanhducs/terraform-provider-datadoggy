@@ -22,7 +22,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/nguyenanhducs/datadog-notebook",
+		Address: "registry.terraform.io/nguyenanhducs/datadoggy",
 		Debug:   debug,
 	}
 
