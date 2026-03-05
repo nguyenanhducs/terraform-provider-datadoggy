@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/nguyenanhducs/terraform-provider-datadoggy/compare/v0.1.1...v0.1.2) (2026-03-05)
+
+
+### Features
+
+* add release workflow ([#17](https://github.com/nguyenanhducs/terraform-provider-datadoggy/issues/17)) ([89426a2](https://github.com/nguyenanhducs/terraform-provider-datadoggy/commit/89426a2c8bc2a7c4b0eea0db884580026f666c84))
+
 ## [0.1.1](https://github.com/nguyenanhducs/terraform-provider-datadoggy/compare/v0.1.0...v0.1.1) (2026-03-05)
 
 
