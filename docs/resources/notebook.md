@@ -29,7 +29,7 @@ resource "datadoggy_notebook" "example" {
     }
   ])
 
-  teams = ["team:sre"]
+  teams = ["sre"]
 
   time = {
     live_span = "1h"
@@ -53,7 +53,7 @@ output "notebook_id" {
 
 - `is_template` (Boolean) Whether this notebook is a template. Defaults to `false`.
 - `take_snapshots` (Boolean) Whether to create graph snapshots. Defaults to `false`.
-- `teams` (List of String) Team tags associated with the notebook. Maximum 5 entries.
+- `teams` (List of String) Bare team names (e.g. `sre`). The provider translates these to `team:<name>` tags in Datadog. Maximum 5 entries.
 - `template_variables` (Attributes List) Template variables scoped to this notebook. (see [below for nested schema](#nestedatt--template_variables))
 - `time` (Attributes) Global time window applied to all cells. Use `live_span` for relative time or `start`+`end` for absolute. (see [below for nested schema](#nestedatt--time))
 - `type` (String) Notebook classification. Allowed values: `postmortem`, `runbook`, `investigation`, `documentation`, `report`.

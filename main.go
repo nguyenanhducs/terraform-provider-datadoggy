@@ -9,7 +9,7 @@ import (
 	"log"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/nguyenanhducs/terraform-provider-datadog-notebook/internal/provider"
+	"github.com/nguyenanhducs/terraform-provider-datadoggy/internal/provider"
 )
 
 // version is overwritten at release time by goreleaser via -X main.version={{.Version}}.
