@@ -1,6 +1,3 @@
-// Copyright IBM Corp. 2021, 2025
-// SPDX-License-Identifier: MPL-2.0
-
 package provider
 
 import (
@@ -8,6 +5,8 @@ import (
 	"testing"
 
 	fwprovider "github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestDatadogProviderMetadata(t *testing.T) {
@@ -50,5 +49,81 @@ func TestDatadogProviderDataSources(t *testing.T) {
 	dataSources := p.DataSources(context.Background())
 	if len(dataSources) != 0 {
 		t.Errorf("expected 0 data sources, got %d", len(dataSources))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Configure — api_url validation (T025, T026, T027)
+// ---------------------------------------------------------------------------
+
+// makeProviderConfigureRequest constructs a provider.ConfigureRequest with the
+// given api_url value (empty string means null/unset) for Configure() unit tests.
+func makeProviderConfigureRequest(t *testing.T, apiURL string) fwprovider.ConfigureRequest {
+	t.Helper()
+	p := &DatadogProvider{}
+	schemaResp := &fwprovider.SchemaResponse{}
+	p.Schema(context.Background(), fwprovider.SchemaRequest{}, schemaResp)
+
+	apiURLVal := tftypes.NewValue(tftypes.String, nil) // null
+	if apiURL != "" {
+		apiURLVal = tftypes.NewValue(tftypes.String, apiURL)
+	}
+	configVal := tftypes.NewValue(
+		tftypes.Object{
+			AttributeTypes: map[string]tftypes.Type{
+				"api_key":  tftypes.String,
+				"app_key":  tftypes.String,
+				"api_url":  tftypes.String,
+				"validate": tftypes.Bool,
+			},
+		},
+		map[string]tftypes.Value{
+			"api_key":  tftypes.NewValue(tftypes.String, nil),
+			"app_key":  tftypes.NewValue(tftypes.String, nil),
+			"api_url":  apiURLVal,
+			"validate": tftypes.NewValue(tftypes.Bool, nil),
+		},
+	)
+	return fwprovider.ConfigureRequest{
+		Config: tfsdk.Config{
+			Raw:    configVal,
+			Schema: schemaResp.Schema,
+		},
+	}
+}
+
+// TestConfigureInvalidAPIURLScheme verifies that Configure rejects api_url values
+// that use a scheme other than http or https.
+func TestConfigureInvalidAPIURLScheme(t *testing.T) {
+	p := &DatadogProvider{}
+	req := makeProviderConfigureRequest(t, "ftp://api.datadoghq.com")
+	resp := &fwprovider.ConfigureResponse{}
+	p.Configure(context.Background(), req, resp)
+	if !resp.Diagnostics.HasError() {
+		t.Error("expected error diagnostic for ftp:// scheme, got none")
+	}
+}
+
+// TestConfigureInvalidAPIURLNoHost verifies that Configure rejects api_url values
+// that have a valid scheme but an empty host.
+func TestConfigureInvalidAPIURLNoHost(t *testing.T) {
+	p := &DatadogProvider{}
+	req := makeProviderConfigureRequest(t, "https://")
+	resp := &fwprovider.ConfigureResponse{}
+	p.Configure(context.Background(), req, resp)
+	if !resp.Diagnostics.HasError() {
+		t.Error("expected error diagnostic for empty host, got none")
+	}
+}
+
+// TestConfigureInvalidAPIURLAPIPath verifies that Configure still rejects api_url
+// values ending with /api/ (the original validation remains in place).
+func TestConfigureInvalidAPIURLAPIPath(t *testing.T) {
+	p := &DatadogProvider{}
+	req := makeProviderConfigureRequest(t, "https://api.datadoghq.com/api/")
+	resp := &fwprovider.ConfigureResponse{}
+	p.Configure(context.Background(), req, resp)
+	if !resp.Diagnostics.HasError() {
+		t.Error("expected error diagnostic for /api/ suffix, got none")
 	}
 }

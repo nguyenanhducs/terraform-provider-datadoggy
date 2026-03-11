@@ -16,20 +16,56 @@ Manages a Datadog Notebook resource.
 resource "datadoggy_notebook" "example" {
   name = "Example Service Runbook"
   type = "runbook"
+  template_variables = [
+    {
+      name    = "service"
+      prefix  = "service"
+      default = "*"
+    },
+    {
+      name             = "zone_name"
+      prefix           = "zone_name"
+      default          = "optimizely.com"
+      available_values = ["optimizely.com"]
+    }
+  ]
 
   cells = jsonencode([
     {
       type = "notebook_cells"
       attributes = {
         definition = {
+          type = "iframe"
+          url  = "https://www.optimizely.com"
+        }
+        graph_size = "xl"
+      }
+    },
+    {
+      type = "notebook_cells"
+      attributes = {
+        definition = {
           type = "markdown"
-          text = "## Overview\nThis runbook covers the service deploy process."
+          text = "# Optimizely: World's leading AI-powered digital experiences\n\n[Learn more about Optimizely](https://www.optimizely.com)"
+        }
+      }
+    },
+    {
+      type = "notebook_cells"
+      attributes = {
+        definition = {
+          type = "markdown"
+          text = <<-EOT
+            ## AI-powered digital experiences that convert quickly
+
+            Empowering marketing and digital teams with everything they need to create content fast, test and personalize with ease, and prove impact on business.
+          EOT
         }
       }
     }
   ])
 
-  teams = ["team:sre"]
+  teams = ["sre"]
 
   time = {
     live_span = "1h"
@@ -53,7 +89,7 @@ output "notebook_id" {
 
 - `is_template` (Boolean) Whether this notebook is a template. Defaults to `false`.
 - `take_snapshots` (Boolean) Whether to create graph snapshots. Defaults to `false`.
-- `teams` (List of String) Team tags associated with the notebook. Maximum 5 entries.
+- `teams` (List of String) Bare team names (e.g. `sre`). The provider translates these to `team:<name>` tags in Datadog. Maximum 5 entries.
 - `template_variables` (Attributes List) Template variables scoped to this notebook. (see [below for nested schema](#nestedatt--template_variables))
 - `time` (Attributes) Global time window applied to all cells. Use `live_span` for relative time or `start`+`end` for absolute. (see [below for nested schema](#nestedatt--time))
 - `type` (String) Notebook classification. Allowed values: `postmortem`, `runbook`, `investigation`, `documentation`, `report`.
