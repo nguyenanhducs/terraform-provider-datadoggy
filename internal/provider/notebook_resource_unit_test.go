@@ -1081,7 +1081,7 @@ func TestCellsFromJSON_graphSizeAtTopLevelMovedToAttrs(t *testing.T) {
 // Path is relative to internal/provider/ test working directory.
 func loadCellsFixture(t *testing.T) string {
 	t.Helper()
-	data, err := os.ReadFile("test/cells.json")
+	data, err := os.ReadFile("data/cells.json")
 	if err != nil {
 		t.Fatalf("failed to read cells.json fixture: %v", err)
 	}
