@@ -1,6 +1,3 @@
-// Copyright IBM Corp. 2021, 2025
-// SPDX-License-Identifier: MPL-2.0
-
 package provider
 
 import (
@@ -15,6 +12,7 @@ import (
 	datadogV1 "github.com/DataDog/datadog-api-client-go/v2/api/datadogV1"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -295,9 +293,19 @@ func (r *NotebookResource) Create(ctx context.Context, req resource.CreateReques
 		attrs.AdditionalProperties = make(map[string]interface{})
 	}
 	if len(data.TemplateVariables) > 0 {
-		attrs.AdditionalProperties["template_variables"] = buildTemplateVariables(ctx, data.TemplateVariables)
+		tvs, d := buildTemplateVariables(ctx, data.TemplateVariables)
+		resp.Diagnostics.Append(d...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		attrs.AdditionalProperties["template_variables"] = tvs
 	}
-	if tags := teamsToTagSlice(ctx, data.Teams); len(tags) > 0 {
+	tags, d := teamsToTagSlice(ctx, data.Teams)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if len(tags) > 0 {
 		attrs.AdditionalProperties["tags"] = tags
 	}
 
@@ -317,7 +325,7 @@ func (r *NotebookResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	data.ID = types.StringValue(strconv.FormatInt(notebookResp.Data.GetId(), 10))
-	mapResponseToModel(ctx, notebookResp.Data.GetAttributes(), &data)
+	resp.Diagnostics.Append(mapResponseToModel(ctx, notebookResp.Data.GetAttributes(), &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -354,7 +362,7 @@ func (r *NotebookResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	mapResponseToModel(ctx, notebookResp.Data.GetAttributes(), &data)
+	resp.Diagnostics.Append(mapResponseToModel(ctx, notebookResp.Data.GetAttributes(), &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -412,9 +420,19 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 		attrs.AdditionalProperties = make(map[string]interface{})
 	}
 	if len(data.TemplateVariables) > 0 {
-		attrs.AdditionalProperties["template_variables"] = buildTemplateVariables(ctx, data.TemplateVariables)
+		tvs, d := buildTemplateVariables(ctx, data.TemplateVariables)
+		resp.Diagnostics.Append(d...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		attrs.AdditionalProperties["template_variables"] = tvs
 	}
-	if tags := teamsToTagSlice(ctx, data.Teams); len(tags) > 0 {
+	tags, d := teamsToTagSlice(ctx, data.Teams)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if len(tags) > 0 {
 		attrs.AdditionalProperties["tags"] = tags
 	}
 
@@ -427,7 +445,7 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	mapResponseToModel(ctx, notebookResp.Data.GetAttributes(), &data)
+	resp.Diagnostics.Append(mapResponseToModel(ctx, notebookResp.Data.GetAttributes(), &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -743,7 +761,9 @@ func buildMetadata(data NotebookResourceModel) *datadogV1.NotebookMetadata {
 }
 
 // buildTemplateVariables converts the Terraform model to API-compatible slice.
-func buildTemplateVariables(ctx context.Context, tvs []TemplateVariableModel) []map[string]interface{} {
+// Returns diagnostics for any errors encountered during ElementsAs conversion.
+func buildTemplateVariables(ctx context.Context, tvs []TemplateVariableModel) ([]map[string]interface{}, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	result := make([]map[string]interface{}, 0, len(tvs))
 	for _, tv := range tvs {
 		m := map[string]interface{}{
@@ -757,21 +777,29 @@ func buildTemplateVariables(ctx context.Context, tvs []TemplateVariableModel) []
 		}
 		if !tv.AvailableValues.IsNull() {
 			var vals []string
-			tv.AvailableValues.ElementsAs(ctx, &vals, false) //nolint:errcheck
+			d := tv.AvailableValues.ElementsAs(ctx, &vals, false)
+			diags.Append(d...)
+			if d.HasError() {
+				return nil, diags
+			}
 			m["available_values"] = vals
 		}
 		result = append(result, m)
 	}
-	return result
+	return result, diags
 }
 
 // mapResponseToModel maps a NotebookResponseDataAttributes back into the Terraform state model.
-func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDataAttributes, data *NotebookResourceModel) {
+// Returns diagnostics for any errors encountered during cell serialization or type conversion.
+func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDataAttributes, data *NotebookResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+
 	data.Name = types.StringValue(attrs.GetName())
 
 	cellsJSON, err := cellsToJSON(attrs.GetCells())
 	if err != nil {
-		return
+		diags.AddError("Error serializing notebook cells", err.Error())
+		return diags
 	}
 	data.Cells = types.StringValue(cellsJSON)
 
@@ -811,7 +839,11 @@ func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDat
 	// Map template_variables from AdditionalProperties; ignore empty list so a
 	// null plan value is not replaced with an empty list.
 	if tvRaw, ok := attrs.AdditionalProperties["template_variables"]; ok && tvRaw != nil {
-		tvs := parseTemplateVariables(ctx, tvRaw)
+		tvs, d := parseTemplateVariables(ctx, tvRaw)
+		diags.Append(d...)
+		if diags.HasError() {
+			return diags
+		}
 		if len(tvs) > 0 {
 			data.TemplateVariables = tvs
 		}
@@ -821,24 +853,29 @@ func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDat
 	if tagsRaw, ok := attrs.AdditionalProperties["tags"]; ok && tagsRaw != nil {
 		names := tagsToTeamNames(tagsRaw)
 		if len(names) > 0 {
-			teams, diags := types.ListValueFrom(ctx, types.StringType, names)
+			teams, d := types.ListValueFrom(ctx, types.StringType, names)
+			diags.Append(d...)
 			if diags.HasError() {
-				return
+				return diags
 			}
 			data.Teams = teams
 		}
 	}
+
+	return diags
 }
 
 // parseTemplateVariables attempts to parse template variables from AdditionalProperties.
-func parseTemplateVariables(ctx context.Context, raw interface{}) []TemplateVariableModel {
+// Returns diagnostics for any errors encountered during ListValueFrom conversion.
+func parseTemplateVariables(ctx context.Context, raw interface{}) ([]TemplateVariableModel, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, diags
 	}
 	var items []map[string]interface{}
 	if err := json.Unmarshal(b, &items); err != nil {
-		return nil
+		return nil, diags
 	}
 	result := make([]TemplateVariableModel, 0, len(items))
 	for _, item := range items {
@@ -863,7 +900,11 @@ func parseTemplateVariables(ctx context.Context, raw interface{}) []TemplateVari
 					strs = append(strs, sv)
 				}
 			}
-			elems, _ := types.ListValueFrom(ctx, types.StringType, strs)
+			elems, d := types.ListValueFrom(ctx, types.StringType, strs)
+			diags.Append(d...)
+			if d.HasError() {
+				return nil, diags
+			}
 			tv.AvailableValues = elems
 		} else {
 			// Treat empty or absent available_values from the API as null so state
@@ -872,25 +913,31 @@ func parseTemplateVariables(ctx context.Context, raw interface{}) []TemplateVari
 		}
 		result = append(result, tv)
 	}
-	return result
+	return result, diags
 }
 
 // teamsToTagSlice converts bare team names (e.g. ["sre"]) into "team:<name>" tag strings.
 // Returns nil when the list is null, unknown, or empty.
-func teamsToTagSlice(ctx context.Context, teams types.List) []string {
+// Returns diagnostics for any errors encountered during ElementsAs conversion.
+func teamsToTagSlice(ctx context.Context, teams types.List) ([]string, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	if teams.IsNull() || teams.IsUnknown() {
-		return nil
+		return nil, diags
 	}
 	var names []string
-	teams.ElementsAs(ctx, &names, false) //nolint:errcheck
+	d := teams.ElementsAs(ctx, &names, false)
+	diags.Append(d...)
+	if d.HasError() {
+		return nil, diags
+	}
 	if len(names) == 0 {
-		return nil
+		return nil, diags
 	}
 	tags := make([]string, len(names))
 	for i, n := range names {
 		tags[i] = "team:" + n
 	}
-	return tags
+	return tags, diags
 }
 
 // tagsToTeamNames filters a raw AdditionalProperties tags value for "team:"-prefixed entries
