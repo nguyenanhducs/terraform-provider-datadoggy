@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3](https://github.com/nguyenanhducs/terraform-provider-datadoggy/compare/v0.1.2...v0.1.3) (2026-03-12)
+
+
+### Features
+
+* add cells.json fixture and update test to load from new path ([#26](https://github.com/nguyenanhducs/terraform-provider-datadoggy/issues/26)) ([083e51f](https://github.com/nguyenanhducs/terraform-provider-datadoggy/commit/083e51f2164cd6c446f15cd65dd5b772b476803b))
+
+
+### Bug Fixes
+
+* add newline at end of notebook_resource.go file ([#23](https://github.com/nguyenanhducs/terraform-provider-datadoggy/issues/23)) ([53cf3a6](https://github.com/nguyenanhducs/terraform-provider-datadoggy/commit/53cf3a69eab70815ab4d48901b8ea681c3ce0086))
+* update path for loading cells.json fixture in unit test ([#28](https://github.com/nguyenanhducs/terraform-provider-datadoggy/issues/28)) ([c3edd7c](https://github.com/nguyenanhducs/terraform-provider-datadoggy/commit/c3edd7c17b8f35362d908ad8e2be20a62d52ba24))
+
 ## [0.1.2](https://github.com/nguyenanhducs/terraform-provider-datadoggy/compare/v0.1.1...v0.1.2) (2026-03-05)
 
 
