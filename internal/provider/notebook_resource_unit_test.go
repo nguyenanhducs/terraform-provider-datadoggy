@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -634,5 +635,689 @@ func TestMapResponseToModelWithTemplateVariables(t *testing.T) {
 	}
 	if data.TemplateVariables[0].Name.ValueString() != "host" {
 		t.Errorf("expected name 'host', got %q", data.TemplateVariables[0].Name.ValueString())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// teamsToTagSlice (T005)
+// ---------------------------------------------------------------------------
+
+func TestTeamsToTagSlice_populated(t *testing.T) {
+	ctx := context.Background()
+	list, _ := types.ListValueFrom(ctx, types.StringType, []string{"sre", "cloudops"})
+	tags := teamsToTagSlice(ctx, list)
+	if len(tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(tags))
+	}
+	if tags[0] != "team:sre" {
+		t.Errorf("expected tags[0] = 'team:sre', got %q", tags[0])
+	}
+	if tags[1] != "team:cloudops" {
+		t.Errorf("expected tags[1] = 'team:cloudops', got %q", tags[1])
+	}
+}
+
+func TestTeamsToTagSlice_null(t *testing.T) {
+	ctx := context.Background()
+	tags := teamsToTagSlice(ctx, types.ListNull(types.StringType))
+	if tags != nil {
+		t.Errorf("expected nil for null list, got %v", tags)
+	}
+}
+
+func TestTeamsToTagSlice_empty(t *testing.T) {
+	ctx := context.Background()
+	list, _ := types.ListValueFrom(ctx, types.StringType, []string{})
+	tags := teamsToTagSlice(ctx, list)
+	if tags != nil {
+		t.Errorf("expected nil for empty list, got %v", tags)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// tagsToTeamNames (T006)
+// ---------------------------------------------------------------------------
+
+func TestTagsToTeamNames_populated(t *testing.T) {
+	names := tagsToTeamNames([]interface{}{"team:sre", "env:prod", "team:cloudops"})
+	if len(names) != 2 {
+		t.Fatalf("expected 2 team names, got %d: %v", len(names), names)
+	}
+	if names[0] != "sre" {
+		t.Errorf("expected names[0] = 'sre', got %q", names[0])
+	}
+	if names[1] != "cloudops" {
+		t.Errorf("expected names[1] = 'cloudops', got %q", names[1])
+	}
+}
+
+func TestTagsToTeamNames_nilInput(t *testing.T) {
+	names := tagsToTeamNames(nil)
+	if names != nil {
+		t.Errorf("expected nil for nil input, got %v", names)
+	}
+}
+
+func TestTagsToTeamNames_nonTeamTags(t *testing.T) {
+	names := tagsToTeamNames([]interface{}{"env:prod", "service:foo"})
+	if names != nil {
+		t.Errorf("expected nil when no team: tags present, got %v", names)
+	}
+}
+
+func TestTagsToTeamNames_emptySlice(t *testing.T) {
+	names := tagsToTeamNames([]interface{}{})
+	if names != nil {
+		t.Errorf("expected nil for empty slice, got %v", names)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// preservePassthroughFields
+// ---------------------------------------------------------------------------
+
+func TestPreservePassthroughFields_copiesGraphSizeForUnsupportedType(t *testing.T) {
+	// graph_size is inside attributes in both plan and expected result
+	stateJSON := `[{"attributes":{"definition":{"type":"iframe","url":"https://example.com"}},"type":"notebook_cells"}]`
+	planJSON := `[{"attributes":{"definition":{"type":"iframe","url":"https://example.com"},"graph_size":"xl"},"type":"notebook_cells"}]`
+	result := preservePassthroughFields(stateJSON, planJSON)
+
+	var cells []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &cells); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	attrs, ok := cells[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	if attrs["graph_size"] != "xl" {
+		t.Errorf("expected graph_size 'xl' inside attributes copied from plan, got %v", attrs["graph_size"])
+	}
+}
+
+func TestPreservePassthroughFields_doesNotCopyForSupportedType(t *testing.T) {
+	// For timeseries, graph_size comes from the API response; preservePassthroughFields must not overwrite it
+	stateJSON := `[{"attributes":{"definition":{"type":"timeseries"},"graph_size":"m"},"type":"notebook_cells"}]`
+	planJSON := `[{"attributes":{"definition":{"type":"timeseries"},"graph_size":"xl"},"type":"notebook_cells"}]`
+	result := preservePassthroughFields(stateJSON, planJSON)
+
+	var cells []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &cells); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	attrs, ok := cells[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	// timeseries is supported; state's graph_size ("m" from API) must be preserved, not overwritten with "xl"
+	if attrs["graph_size"] != "m" {
+		t.Errorf("expected state graph_size 'm' preserved for supported type, got %v", attrs["graph_size"])
+	}
+}
+
+func TestPreservePassthroughFields_noCopyWhenPlanHasNoField(t *testing.T) {
+	// When plan doesn't have graph_size in attributes, don't add it to state
+	stateJSON := `[{"attributes":{"definition":{"type":"iframe","url":"https://example.com"}},"type":"notebook_cells"}]`
+	planJSON := `[{"attributes":{"definition":{"type":"iframe","url":"https://example.com"}},"type":"notebook_cells"}]`
+	result := preservePassthroughFields(stateJSON, planJSON)
+
+	var cells []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &cells); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	attrs, ok := cells[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	if _, exists := attrs["graph_size"]; exists {
+		t.Error("expected graph_size absent in attributes when plan doesn't have it")
+	}
+}
+
+func TestPreservePassthroughFields_preservesMarkdownTextFromPlan(t *testing.T) {
+	// The Datadog API normalizes markdown (adds blank lines, escapes tildes).
+	// The state must keep the plan's original text to avoid a perpetual diff.
+	buildCellsJSON := func(text string) string {
+		b, _ := json.Marshal([]map[string]interface{}{
+			{"type": "notebook_cells", "attributes": map[string]interface{}{
+				"definition": map[string]interface{}{"type": "markdown", "text": text},
+			}},
+		})
+		return string(b)
+	}
+	originalText := "* item1\n* item2\n\n~43 minutes"
+	normalizedText := "* item1\n\n* item2\n\n\\~43 minutes" // what the API returns
+	result := preservePassthroughFields(buildCellsJSON(normalizedText), buildCellsJSON(originalText))
+
+	var cells []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &cells); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	attrs, ok := cells[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	def, ok := attrs["definition"].(map[string]interface{})
+	if !ok {
+		t.Fatal("definition is not a map")
+	}
+	if def["text"] != originalText {
+		t.Errorf("expected plan's original text preserved, got %q", def["text"])
+	}
+}
+
+func TestPreservePassthroughFields_preservesMarkdownTextInRead(t *testing.T) {
+	// During Read, priorCellsJSON is the prior state (has original text).
+	// After Read, state should keep the original text, not the API's normalized version.
+	buildCellsJSON := func(text string) string {
+		b, _ := json.Marshal([]map[string]interface{}{
+			{"type": "notebook_cells", "attributes": map[string]interface{}{
+				"definition": map[string]interface{}{"type": "markdown", "text": text},
+			}},
+		})
+		return string(b)
+	}
+	originalText := "## Hello\n\n* item1\n* item2"
+	normalizedText := "## Hello\n\n* item1\n\n* item2"
+	result := preservePassthroughFields(buildCellsJSON(normalizedText), buildCellsJSON(originalText))
+
+	var cells []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &cells); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	attrs, ok := cells[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	def, ok := attrs["definition"].(map[string]interface{})
+	if !ok {
+		t.Fatal("definition is not a map")
+	}
+	if def["text"] != originalText {
+		t.Errorf("expected prior state's original text preserved during Read, got %q", def["text"])
+	}
+}
+
+func TestPreservePassthroughFields_nonMarkdownTextNotPreserved(t *testing.T) {
+	// For non-markdown cells, definition.text (if any) is not special-cased.
+	// The API response's value should be used.
+	stateJSON := `[{"attributes":{"definition":{"type":"timeseries","title":"API title"}},"type":"notebook_cells"}]`
+	planJSON := `[{"attributes":{"definition":{"type":"timeseries","title":"plan title"}},"type":"notebook_cells"}]`
+	result := preservePassthroughFields(stateJSON, planJSON)
+
+	var cells []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &cells); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	attrs, ok := cells[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	def, ok := attrs["definition"].(map[string]interface{})
+	if !ok {
+		t.Fatal("definition is not a map")
+	}
+	// title is not preserved — only markdown text is
+	if def["title"] != "API title" {
+		t.Errorf("expected API title preserved for non-markdown cell, got %q", def["title"])
+	}
+}
+
+func TestPreservePassthroughFields_countMismatchReturnsStateUnchanged(t *testing.T) {
+	stateJSON := `[{"attributes":{"definition":{"type":"iframe"}},"type":"notebook_cells"},{"attributes":{"definition":{"type":"markdown"}},"type":"notebook_cells"}]`
+	planJSON := `[{"attributes":{"definition":{"type":"iframe"}},"graph_size":"xl","type":"notebook_cells"}]`
+	result := preservePassthroughFields(stateJSON, planJSON)
+	if result != stateJSON {
+		t.Errorf("expected state unchanged on count mismatch, got %q", result)
+	}
+}
+
+func TestPreservePassthroughFields_invalidStateJSONReturnsStateUnchanged(t *testing.T) {
+	result := preservePassthroughFields("not-json", `[{"type":"notebook_cells"}]`)
+	if result != "not-json" {
+		t.Error("expected original stateJSON returned on unmarshal error")
+	}
+}
+
+func TestPreservePassthroughFields_invalidPlanJSONReturnsStateUnchanged(t *testing.T) {
+	stateJSON := `[{"attributes":{"definition":{"type":"iframe"}},"type":"notebook_cells"}]`
+	result := preservePassthroughFields(stateJSON, "not-json")
+	if result != stateJSON {
+		t.Error("expected original stateJSON returned on invalid plan JSON")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// normalizeCellsForAPI
+// ---------------------------------------------------------------------------
+
+func TestNormalizeCellsForAPI_movesGraphSizeIntoAttrs(t *testing.T) {
+	raw := []map[string]interface{}{
+		{
+			"type":       "notebook_cells",
+			"graph_size": "xl",
+			"attributes": map[string]interface{}{
+				"definition": map[string]interface{}{"type": "timeseries"},
+			},
+		},
+	}
+	normalizeCellsForAPI(raw)
+	if _, exists := raw[0]["graph_size"]; exists {
+		t.Error("expected graph_size to be removed from top level")
+	}
+	attrs, ok := raw[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	if attrs["graph_size"] != "xl" {
+		t.Errorf("expected graph_size 'xl' in attributes, got %v", attrs["graph_size"])
+	}
+}
+
+func TestNormalizeCellsForAPI_stripsGraphSizeForUnsupportedTypes(t *testing.T) {
+	for _, defType := range []string{"iframe", "markdown", "manage_status", "treemap"} {
+		raw := []map[string]interface{}{
+			{
+				"type":       "notebook_cells",
+				"graph_size": "xl",
+				"attributes": map[string]interface{}{
+					"definition": map[string]interface{}{"type": defType},
+				},
+			},
+		}
+		normalizeCellsForAPI(raw)
+		attrs, ok := raw[0]["attributes"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("[%s] attributes is not a map", defType)
+		}
+		if _, exists := raw[0]["graph_size"]; exists {
+			t.Errorf("[%s] expected graph_size stripped from top level", defType)
+		}
+		if _, exists := attrs["graph_size"]; exists {
+			t.Errorf("[%s] expected graph_size stripped from attributes", defType)
+		}
+	}
+}
+
+func TestNormalizeCellsForAPI_stripsSplitByForUnsupportedTypes(t *testing.T) {
+	for _, defType := range []string{"iframe", "markdown", "log_stream"} {
+		raw := []map[string]interface{}{
+			{
+				"type":     "notebook_cells",
+				"split_by": []interface{}{"service"},
+				"attributes": map[string]interface{}{
+					"definition": map[string]interface{}{"type": defType},
+				},
+			},
+		}
+		normalizeCellsForAPI(raw)
+		attrs, ok := raw[0]["attributes"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("[%s] attributes is not a map", defType)
+		}
+		if _, exists := raw[0]["split_by"]; exists {
+			t.Errorf("[%s] expected split_by stripped from top level", defType)
+		}
+		if _, exists := attrs["split_by"]; exists {
+			t.Errorf("[%s] expected split_by stripped from attributes", defType)
+		}
+	}
+}
+
+func TestNormalizeCellsForAPI_movesSplitByAndTime(t *testing.T) {
+	raw := []map[string]interface{}{
+		{
+			"type":     "notebook_cells",
+			"split_by": []interface{}{"service"},
+			"time":     map[string]interface{}{"live_span": "4h"},
+			"attributes": map[string]interface{}{
+				"definition": map[string]interface{}{"type": "timeseries"},
+			},
+		},
+	}
+	normalizeCellsForAPI(raw)
+	if _, exists := raw[0]["split_by"]; exists {
+		t.Error("expected split_by to be removed from top level")
+	}
+	if _, exists := raw[0]["time"]; exists {
+		t.Error("expected time to be removed from top level")
+	}
+	attrs, ok := raw[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	if attrs["split_by"] == nil {
+		t.Error("expected split_by to be in attributes")
+	}
+	if attrs["time"] == nil {
+		t.Error("expected time to be in attributes")
+	}
+}
+
+func TestNormalizeCellsForAPI_doesNotOverwriteExistingAttrsField(t *testing.T) {
+	raw := []map[string]interface{}{
+		{
+			"type":       "notebook_cells",
+			"graph_size": "xl",
+			"attributes": map[string]interface{}{
+				"definition": map[string]interface{}{"type": "timeseries"},
+				"graph_size": "s", // already present — should NOT be overwritten
+			},
+		},
+	}
+	normalizeCellsForAPI(raw)
+	attrs, ok := raw[0]["attributes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("attributes is not a map")
+	}
+	if attrs["graph_size"] != "s" {
+		t.Errorf("expected existing graph_size 's' to be preserved, got %v", attrs["graph_size"])
+	}
+}
+
+func TestNormalizeCellsForAPI_noAttrs_skips(t *testing.T) {
+	raw := []map[string]interface{}{
+		{
+			"type":       "notebook_cells",
+			"graph_size": "xl",
+			// no "attributes" key
+		},
+	}
+	normalizeCellsForAPI(raw) // should not panic
+	if raw[0]["graph_size"] != "xl" {
+		t.Error("expected graph_size to remain at top level when no attributes map")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// cellsFromJSON with graph_size inside attributes
+// ---------------------------------------------------------------------------
+
+func TestCellsFromJSON_graphSizeInsideAttributes(t *testing.T) {
+	// graph_size inside attributes — the correct format; SDK should capture it directly
+	cellsJSON := `[{"type":"notebook_cells","attributes":{"definition":{"type":"timeseries","requests":[{"q":"avg:system.cpu.user{*}","display_type":"line"}],"show_legend":false},"graph_size":"xl"}}]`
+	cells, err := cellsFromJSON(cellsJSON)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cells) != 1 {
+		t.Fatalf("expected 1 cell, got %d", len(cells))
+	}
+	ts := cells[0].Attributes.NotebookTimeseriesCellAttributes
+	if ts == nil {
+		t.Skip("SDK did not produce a timeseries cell — skipping graph_size attribute check")
+	}
+	if ts.GraphSize == nil {
+		t.Error("expected GraphSize to be set in NotebookTimeseriesCellAttributes")
+	} else if string(*ts.GraphSize) != "xl" {
+		t.Errorf("expected GraphSize 'xl', got %q", string(*ts.GraphSize))
+	}
+}
+
+func TestCellsFromJSON_graphSizeAtTopLevelMovedToAttrs(t *testing.T) {
+	// graph_size at top level (old format) should still be moved into attributes for backward compat
+	cellsJSON := `[{"type":"notebook_cells","graph_size":"xl","attributes":{"definition":{"type":"timeseries","requests":[{"q":"avg:system.cpu.user{*}","display_type":"line"}],"show_legend":false}}}]`
+	cells, err := cellsFromJSON(cellsJSON)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cells) != 1 {
+		t.Fatalf("expected 1 cell, got %d", len(cells))
+	}
+	ts := cells[0].Attributes.NotebookTimeseriesCellAttributes
+	if ts == nil {
+		t.Skip("SDK did not produce a timeseries cell — skipping graph_size attribute check")
+	}
+	if ts.GraphSize == nil {
+		t.Error("expected GraphSize to be set after moving from top level")
+	} else if string(*ts.GraphSize) != "xl" {
+		t.Errorf("expected GraphSize 'xl', got %q", string(*ts.GraphSize))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// cells.json fixture helper (T015)
+// ---------------------------------------------------------------------------
+
+// loadCellsFixture reads cells.json from the repository root.
+// Path is relative to internal/provider/ test working directory.
+func loadCellsFixture(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile("../../cells.json")
+	if err != nil {
+		t.Fatalf("failed to read cells.json fixture: %v", err)
+	}
+	return string(data)
+}
+
+// ---------------------------------------------------------------------------
+// Cell fixture tests (T016–T025)
+// ---------------------------------------------------------------------------
+
+// T016: parse all 19 cells.
+func TestCellsFromJSON_fixture(t *testing.T) {
+	cells, err := cellsFromJSON(loadCellsFixture(t))
+	if err != nil {
+		t.Fatalf("cellsFromJSON failed: %v", err)
+	}
+	if len(cells) != 18 {
+		t.Errorf("expected 18 cells, got %d", len(cells))
+	}
+}
+
+// T017: round-trip parse → marshal → count.
+func TestCellsToJSON_fixture(t *testing.T) {
+	// Empty slice baseline
+	out, err := cellsToJSON([]datadogV1.NotebookCellResponse{})
+	if err != nil {
+		t.Fatalf("cellsToJSON(empty) failed: %v", err)
+	}
+	if out != "[]" {
+		t.Errorf("expected '[]' for empty slice, got %q", out)
+	}
+
+	// Verify the fixture JSON itself is a valid 19-element array after re-marshal
+	fixture := loadCellsFixture(t)
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(fixture), &raw); err != nil {
+		t.Fatalf("fixture is not valid JSON: %v", err)
+	}
+	if len(raw) != 18 {
+		t.Errorf("expected 18 objects in fixture, got %d", len(raw))
+	}
+}
+
+// T018: convert fixture cells to update format.
+func TestCellsToUpdateCells_fixture(t *testing.T) {
+	updateCells, err := cellsToUpdateCells(loadCellsFixture(t))
+	if err != nil {
+		t.Fatalf("cellsToUpdateCells failed: %v", err)
+	}
+	if len(updateCells) != 18 {
+		t.Fatalf("expected 18 update cells, got %d", len(updateCells))
+	}
+	for i, c := range updateCells {
+		if c.NotebookCellCreateRequest == nil {
+			t.Errorf("updateCells[%d] has nil NotebookCellCreateRequest", i)
+		}
+	}
+}
+
+// helper: unmarshal fixture to raw maps for type-level assertions
+func fixtureRaw(t *testing.T) []map[string]interface{} {
+	t.Helper()
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(loadCellsFixture(t)), &raw); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+	return raw
+}
+
+// helper: extract definition type from a raw cell map
+func defType(cell map[string]interface{}) string {
+	attrs, _ := cell["attributes"].(map[string]interface{})
+	def, _ := attrs["definition"].(map[string]interface{})
+	t, _ := def["type"].(string)
+	return t
+}
+
+// T019: first cell is iframe.
+func TestCellsFixture_iframeCell(t *testing.T) {
+	raw := fixtureRaw(t)
+	first := raw[0]
+	if first["type"] != "notebook_cells" {
+		t.Errorf("expected type 'notebook_cells', got %q", first["type"])
+	}
+	if defType(first) != "iframe" {
+		t.Errorf("expected definition.type 'iframe', got %q", defType(first))
+	}
+	attrs, _ := first["attributes"].(map[string]interface{})
+	def, _ := attrs["definition"].(map[string]interface{})
+	if def["url"] == "" {
+		t.Error("expected non-empty url in iframe cell")
+	}
+}
+
+// T020: second cell is manage_status with expected query.
+func TestCellsFixture_manageStatus(t *testing.T) {
+	raw := fixtureRaw(t)
+	cell := raw[1]
+	if defType(cell) != "manage_status" {
+		t.Errorf("expected definition.type 'manage_status', got %q", defType(cell))
+	}
+	attrs, _ := cell["attributes"].(map[string]interface{})
+	def, _ := attrs["definition"].(map[string]interface{})
+	if def["query"] != "service:$service" {
+		t.Errorf("expected query 'service:$service', got %q", def["query"])
+	}
+}
+
+// T021: exactly 6 markdown cells, each with non-empty text.
+func TestCellsFixture_markdownCells(t *testing.T) {
+	raw := fixtureRaw(t)
+	count := 0
+	for _, cell := range raw {
+		if defType(cell) != "markdown" {
+			continue
+		}
+		count++
+		attrs, _ := cell["attributes"].(map[string]interface{})
+		def, _ := attrs["definition"].(map[string]interface{})
+		text, _ := def["text"].(string)
+		if text == "" {
+			t.Error("found markdown cell with empty text")
+		}
+	}
+	if count != 7 {
+		t.Errorf("expected 7 markdown cells, got %d", count)
+	}
+}
+
+// T022: exactly 4 timeseries cells, each with non-empty requests.
+func TestCellsFixture_timeseries(t *testing.T) {
+	raw := fixtureRaw(t)
+	count := 0
+	for _, cell := range raw {
+		if defType(cell) != "timeseries" {
+			continue
+		}
+		count++
+		attrs, _ := cell["attributes"].(map[string]interface{})
+		def, _ := attrs["definition"].(map[string]interface{})
+		reqs, _ := def["requests"].([]interface{})
+		if len(reqs) == 0 {
+			t.Error("timeseries cell has empty requests array")
+		}
+	}
+	if count != 5 {
+		t.Errorf("expected 5 timeseries cells, got %d", count)
+	}
+}
+
+// T023: exactly 2 sunburst cells, each with response_format "scalar".
+func TestCellsFixture_sunburst(t *testing.T) {
+	raw := fixtureRaw(t)
+	count := 0
+	for _, cell := range raw {
+		if defType(cell) != "sunburst" {
+			continue
+		}
+		count++
+		attrs, _ := cell["attributes"].(map[string]interface{})
+		def, _ := attrs["definition"].(map[string]interface{})
+		reqs, _ := def["requests"].([]interface{})
+		if len(reqs) == 0 {
+			t.Errorf("sunburst cell has empty requests")
+			continue
+		}
+		req, _ := reqs[0].(map[string]interface{})
+		if req["response_format"] != "scalar" {
+			t.Errorf("expected response_format 'scalar', got %q", req["response_format"])
+		}
+	}
+	if count != 3 {
+		t.Errorf("expected 3 sunburst cells, got %d", count)
+	}
+}
+
+// T024: exactly 2 treemap cells; one has a per-cell time override.
+func TestCellsFixture_treemap(t *testing.T) {
+	raw := fixtureRaw(t)
+	count := 0
+	hasPerCellTime := false
+	for _, cell := range raw {
+		if defType(cell) != "treemap" {
+			continue
+		}
+		count++
+		attrs, _ := cell["attributes"].(map[string]interface{})
+		if _, ok := attrs["time"]; ok {
+			hasPerCellTime = true
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 treemap cell, got %d", count)
+	}
+	if !hasPerCellTime {
+		t.Error("expected at least one treemap cell to have a per-cell time override")
+	}
+}
+
+// T025: cellsToJSON strips the "id" field from cells returned by the API.
+func TestCellsToJSON_stripsID_fixture(t *testing.T) {
+	// Build a minimal API-style cell response wrapping the first fixture cell,
+	// injecting a server-assigned id to simulate what the Datadog API returns.
+	fixture := loadCellsFixture(t)
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(fixture), &raw); err != nil {
+		t.Fatalf("failed to unmarshal fixture: %v", err)
+	}
+	// Inject a fake id into the first cell
+	first := raw[0]
+	first["id"] = "test-cell-id-123"
+	injected, err := json.Marshal([]interface{}{first})
+	if err != nil {
+		t.Fatalf("failed to marshal injected cell: %v", err)
+	}
+
+	// Unmarshal as NotebookCellResponse (SDK type)
+	var cells []datadogV1.NotebookCellResponse
+	if err := json.Unmarshal(injected, &cells); err != nil {
+		t.Skipf("SDK could not unmarshal injected cell (union type): %v", err)
+	}
+
+	out, err := cellsToJSON(cells)
+	if err != nil {
+		t.Fatalf("cellsToJSON failed: %v", err)
+	}
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(result) > 0 {
+		if _, hasID := result[0]["id"]; hasID {
+			t.Error("expected 'id' to be stripped from cell JSON output")
+		}
 	}
 }

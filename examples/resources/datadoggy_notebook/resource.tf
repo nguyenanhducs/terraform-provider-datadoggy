@@ -14,7 +14,7 @@ resource "datadoggy_notebook" "example" {
     }
   ])
 
-  teams = ["team:sre"]
+  teams = ["sre"]
 
   time = {
     live_span = "1h"

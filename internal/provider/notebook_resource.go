@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	datadogV1 "github.com/DataDog/datadog-api-client-go/v2/api/datadogV1"
@@ -26,7 +27,6 @@ import (
 // Compile-time interface assertions.
 var _ resource.Resource = &NotebookResource{}
 var _ resource.ResourceWithConfigure = &NotebookResource{}
-var _ resource.ResourceWithImportState = &NotebookResource{}
 var _ resource.ResourceWithConfigValidators = &NotebookResource{}
 
 // NewNotebookResource returns a new NotebookResource.
@@ -137,7 +137,7 @@ func (r *NotebookResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Optional:            true,
 			},
 			"teams": schema.ListAttribute{
-				MarkdownDescription: "Team tags associated with the notebook. Maximum 5 entries.",
+				MarkdownDescription: "Bare team names (e.g. `sre`). The provider translates these to `team:<name>` tags in Datadog. Maximum 5 entries.",
 				Optional:            true,
 				ElementType:         types.StringType,
 				Validators: []validator.List{
@@ -271,7 +271,8 @@ func (r *NotebookResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	cells, err := cellsFromJSON(data.Cells.ValueString())
+	planCellsJSON := data.Cells.ValueString()
+	cells, err := cellsFromJSON(planCellsJSON)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid cells JSON", err.Error())
 		return
@@ -289,12 +290,15 @@ func (r *NotebookResource) Create(ctx context.Context, req resource.CreateReques
 		attrs.SetMetadata(*metadata)
 	}
 
-	// Set template_variables via AdditionalProperties if present.
+	// Init AdditionalProperties once and set template_variables and teams tags.
+	if attrs.AdditionalProperties == nil {
+		attrs.AdditionalProperties = make(map[string]interface{})
+	}
 	if len(data.TemplateVariables) > 0 {
-		tvs := buildTemplateVariables(ctx, data.TemplateVariables)
-		attrs.AdditionalProperties = map[string]interface{}{
-			"template_variables": tvs,
-		}
+		attrs.AdditionalProperties["template_variables"] = buildTemplateVariables(ctx, data.TemplateVariables)
+	}
+	if tags := teamsToTagSlice(ctx, data.Teams); len(tags) > 0 {
+		attrs.AdditionalProperties["tags"] = tags
 	}
 
 	createData := datadogV1.NewNotebookCreateData(*attrs, datadogV1.NOTEBOOKRESOURCETYPE_NOTEBOOKS)
@@ -317,6 +321,10 @@ func (r *NotebookResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Use plan cells directly: the API accepted the request so the notebook now contains
+	// what we sent. The API response may inject separator cells or reorder content, so
+	// we trust the plan as source of truth for the cells state.
+	data.Cells = types.StringValue(planCellsJSON)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -328,6 +336,7 @@ func (r *NotebookResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	priorCellsJSON := data.Cells.ValueString()
 
 	notebookID, err := strconv.ParseInt(data.ID.ValueString(), 10, 64)
 	if err != nil {
@@ -349,6 +358,18 @@ func (r *NotebookResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Reconcile API response cells with the prior state (which mirrors the user's plan).
+	// The Datadog API may inject separator cells or reorder content, causing cell-count
+	// mismatches. When counts differ, keep the prior state so no spurious diff is shown.
+	apiCellsJSON := data.Cells.ValueString()
+	var apiCells, priorCells []map[string]interface{}
+	if json.Unmarshal([]byte(apiCellsJSON), &apiCells) == nil &&
+		json.Unmarshal([]byte(priorCellsJSON), &priorCells) == nil &&
+		len(apiCells) == len(priorCells) {
+		data.Cells = types.StringValue(preservePassthroughFields(apiCellsJSON, priorCellsJSON))
+	} else {
+		data.Cells = types.StringValue(priorCellsJSON)
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -361,6 +382,7 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	planCellsJSON := data.Cells.ValueString()
 	notebookID, err := strconv.ParseInt(data.ID.ValueString(), 10, 64)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid notebook ID", err.Error())
@@ -385,11 +407,15 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 		attrs.SetMetadata(*metadata)
 	}
 
+	// Init AdditionalProperties once and set template_variables and teams tags.
+	if attrs.AdditionalProperties == nil {
+		attrs.AdditionalProperties = make(map[string]interface{})
+	}
 	if len(data.TemplateVariables) > 0 {
-		tvs := buildTemplateVariables(ctx, data.TemplateVariables)
-		attrs.AdditionalProperties = map[string]interface{}{
-			"template_variables": tvs,
-		}
+		attrs.AdditionalProperties["template_variables"] = buildTemplateVariables(ctx, data.TemplateVariables)
+	}
+	if tags := teamsToTagSlice(ctx, data.Teams); len(tags) > 0 {
+		attrs.AdditionalProperties["tags"] = tags
 	}
 
 	updateData := datadogV1.NewNotebookUpdateData(*attrs, datadogV1.NOTEBOOKRESOURCETYPE_NOTEBOOKS)
@@ -405,6 +431,9 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Use plan cells directly: same reasoning as Create — the API accepted the request
+	// so the notebook now contains what we sent.
+	data.Cells = types.StringValue(planCellsJSON)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -433,18 +462,147 @@ func (r *NotebookResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 }
 
-// ImportState imports a Datadog Notebook by ID.
-func (r *NotebookResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+// --- Helper functions ---
+
+// cellAttrFields are cell-level fields that belong inside `attributes` in the SDK
+// but are written at the top cell level by users (following the Datadog UI convention).
+var cellAttrFields = []string{"graph_size", "split_by", "time"}
+
+// graphSizeSupportedTypes lists definition.type values whose SDK attributes struct
+// has a GraphSize field and whose API will return graph_size in responses.
+var graphSizeSupportedTypes = map[string]bool{
+	"timeseries":   true,
+	"toplist":      true,
+	"heatmap":      true,
+	"distribution": true,
+	"log_stream":   true,
 }
 
-// --- Helper functions ---
+// splitBySupportedTypes lists definition.type values whose SDK attributes struct
+// has a SplitBy field and whose API will return split_by in responses.
+var splitBySupportedTypes = map[string]bool{
+	"timeseries":   true,
+	"toplist":      true,
+	"heatmap":      true,
+	"distribution": true,
+}
+
+// cellDefinitionType returns the definition.type string for a raw cell map.
+func cellDefinitionType(cell map[string]interface{}) string {
+	attrs, _ := cell["attributes"].(map[string]interface{})
+	def, _ := attrs["definition"].(map[string]interface{})
+	t, _ := def["type"].(string)
+	return t
+}
+
+// normalizeCellsForAPI moves graph_size, split_by, and time from the top cell level
+// into attributes before sending to the Datadog API (where they belong in the SDK types).
+// It also strips graph_size and split_by from cell types that don't support them.
+func normalizeCellsForAPI(raw []map[string]interface{}) {
+	for _, cell := range raw {
+		attrs, ok := cell["attributes"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		defType := cellDefinitionType(cell)
+		for _, field := range cellAttrFields {
+			if val, exists := cell[field]; exists {
+				if _, inAttrs := attrs[field]; !inAttrs {
+					attrs[field] = val
+				}
+				delete(cell, field)
+			}
+		}
+		// Strip fields from attributes when the cell type doesn't support them,
+		// so we don't send unsupported fields to the API.
+		if !graphSizeSupportedTypes[defType] {
+			delete(attrs, "graph_size")
+		}
+		if !splitBySupportedTypes[defType] {
+			delete(attrs, "split_by")
+		}
+	}
+}
+
+// preservePassthroughFields copies graph_size and split_by from planCells into stateCells
+// for cell types where the Datadog API silently ignores these fields and never returns them.
+// This prevents a false "Provider produced inconsistent result" error when the plan has a
+// field that the API echoes back but the state doesn't.
+// Cells are matched positionally; if counts differ the original stateCellsJSON is returned unchanged.
+func preservePassthroughFields(stateCellsJSON, planCellsJSON string) string {
+	var stateCells, planCells []map[string]interface{}
+	if err := json.Unmarshal([]byte(stateCellsJSON), &stateCells); err != nil {
+		return stateCellsJSON
+	}
+	if err := json.Unmarshal([]byte(planCellsJSON), &planCells); err != nil {
+		return stateCellsJSON
+	}
+	if len(stateCells) != len(planCells) {
+		return stateCellsJSON
+	}
+	for i, stateCell := range stateCells {
+		planCell := planCells[i]
+		defType := cellDefinitionType(stateCell)
+		stateAttrs, _ := stateCell["attributes"].(map[string]interface{})
+		planAttrs, _ := planCell["attributes"].(map[string]interface{})
+		if stateAttrs == nil || planAttrs == nil {
+			continue
+		}
+		if !graphSizeSupportedTypes[defType] {
+			if val, ok := planAttrs["graph_size"]; ok {
+				stateAttrs["graph_size"] = val
+			}
+		}
+		if !splitBySupportedTypes[defType] {
+			if val, ok := planAttrs["split_by"]; ok {
+				stateAttrs["split_by"] = val
+			}
+		}
+		// For cell types that the Datadog API doesn't round-trip the per-cell `time`
+		// override for (e.g. treemap, sunburst, manage_status), preserve it from the plan.
+		// graphSizeSupportedTypes is a reliable proxy for "graph cell types that the
+		// Notebooks API fully supports" (timeseries, toplist, heatmap, distribution, log_stream).
+		if !graphSizeSupportedTypes[defType] {
+			if val, ok := planAttrs["time"]; ok {
+				stateAttrs["time"] = val
+			} else {
+				delete(stateAttrs, "time")
+			}
+		}
+		// The Datadog API normalizes markdown text (adds blank lines between list items,
+		// escapes tildes, etc.) before storing it. Preserve the plan/prior-state text so
+		// the state always matches what the user wrote, preventing perpetual diffs.
+		if defType == "markdown" {
+			stateDef, _ := stateAttrs["definition"].(map[string]interface{})
+			planDef, _ := planAttrs["definition"].(map[string]interface{})
+			if stateDef != nil && planDef != nil {
+				if text, ok := planDef["text"]; ok {
+					stateDef["text"] = text
+				}
+			}
+		}
+	}
+	out, err := json.Marshal(stateCells)
+	if err != nil {
+		return stateCellsJSON
+	}
+	return string(out)
+}
 
 // cellsFromJSON unmarshals a JSON string into a slice of NotebookCellCreateRequest.
 func cellsFromJSON(cellsJSON string) ([]datadogV1.NotebookCellCreateRequest, error) {
-	var cells []datadogV1.NotebookCellCreateRequest
-	if err := json.Unmarshal([]byte(cellsJSON), &cells); err != nil {
+	var rawCells []map[string]interface{}
+	if err := json.Unmarshal([]byte(cellsJSON), &rawCells); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal cells JSON: %w", err)
+	}
+	normalizeCellsForAPI(rawCells)
+	normalized, err := json.Marshal(rawCells)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-marshal normalized cells: %w", err)
+	}
+	var cells []datadogV1.NotebookCellCreateRequest
+	if err := json.Unmarshal(normalized, &cells); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cells into SDK types: %w", err)
 	}
 	return cells, nil
 }
@@ -463,26 +621,63 @@ func cellsToUpdateCells(cellsJSON string) ([]datadogV1.NotebookUpdateCell, error
 }
 
 // cellsToJSON marshals response cells back into a JSON string for state storage,
-// stripping the server-assigned cell `id` field so the stored JSON matches the
-// user's original jsonencode([...]) input.
+// stripping the server-assigned cell `id`, empty markdown separator cells inserted
+// by the Datadog API, and null-valued attribute keys to keep state consistent with
+// the user's original jsonencode([...]) input.
 func cellsToJSON(cells []datadogV1.NotebookCellResponse) (string, error) {
 	b, err := json.Marshal(cells)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal cells to JSON: %w", err)
 	}
-	// Remove "id" from each cell object so state matches the plan format.
 	var raw []map[string]interface{}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return "", fmt.Errorf("failed to unmarshal cells for id-stripping: %w", err)
 	}
+
+	// Filter out empty markdown separator cells injected by the Datadog API between
+	// adjacent non-markdown cells. These have definition.text == "" and are never
+	// written by users, so they must not appear in state.
+	filtered := raw[:0]
+	for _, cell := range raw {
+		if !isEmptyMarkdownSeparator(cell) {
+			filtered = append(filtered, cell)
+		}
+	}
+	raw = filtered
+
 	for _, cell := range raw {
 		delete(cell, "id")
+		// Strip null-valued keys from attributes to avoid spurious diffs when the
+		// API returns e.g. "time": null for cells that have no per-cell time override.
+		if attrs, ok := cell["attributes"].(map[string]interface{}); ok {
+			for k, v := range attrs {
+				if v == nil {
+					delete(attrs, k)
+				}
+			}
+		}
 	}
 	out, err := json.Marshal(raw)
 	if err != nil {
 		return "", fmt.Errorf("failed to re-marshal cells after id-stripping: %w", err)
 	}
 	return string(out), nil
+}
+
+// isEmptyMarkdownSeparator returns true for empty markdown cells (definition.text == "")
+// that the Datadog API inserts between adjacent non-markdown cells.
+func isEmptyMarkdownSeparator(cell map[string]interface{}) bool {
+	attrs, _ := cell["attributes"].(map[string]interface{})
+	if attrs == nil {
+		return false
+	}
+	def, _ := attrs["definition"].(map[string]interface{})
+	if def == nil {
+		return false
+	}
+	t, _ := def["type"].(string)
+	text, _ := def["text"].(string)
+	return t == "markdown" && text == ""
 }
 
 // buildGlobalTime constructs a NotebookGlobalTime from the model.
@@ -621,6 +816,18 @@ func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDat
 			data.TemplateVariables = tvs
 		}
 	}
+
+	// Map teams from AdditionalProperties["tags"].
+	if tagsRaw, ok := attrs.AdditionalProperties["tags"]; ok && tagsRaw != nil {
+		names := tagsToTeamNames(tagsRaw)
+		if len(names) > 0 {
+			teams, diags := types.ListValueFrom(ctx, types.StringType, names)
+			if diags.HasError() {
+				return
+			}
+			data.Teams = teams
+		}
+	}
 }
 
 // parseTemplateVariables attempts to parse template variables from AdditionalProperties.
@@ -649,7 +856,7 @@ func parseTemplateVariables(ctx context.Context, raw interface{}) []TemplateVari
 		} else {
 			tv.Default = types.StringNull()
 		}
-		if v, ok := item["available_values"].([]interface{}); ok {
+		if v, ok := item["available_values"].([]interface{}); ok && len(v) > 0 {
 			strs := make([]string, 0, len(v))
 			for _, s := range v {
 				if sv, ok := s.(string); ok {
@@ -659,9 +866,49 @@ func parseTemplateVariables(ctx context.Context, raw interface{}) []TemplateVari
 			elems, _ := types.ListValueFrom(ctx, types.StringType, strs)
 			tv.AvailableValues = elems
 		} else {
+			// Treat empty or absent available_values from the API as null so state
+			// matches configs that omit the field (avoids spurious [] → null diffs).
 			tv.AvailableValues = types.ListNull(types.StringType)
 		}
 		result = append(result, tv)
 	}
 	return result
+}
+
+// teamsToTagSlice converts bare team names (e.g. ["sre"]) into "team:<name>" tag strings.
+// Returns nil when the list is null, unknown, or empty.
+func teamsToTagSlice(ctx context.Context, teams types.List) []string {
+	if teams.IsNull() || teams.IsUnknown() {
+		return nil
+	}
+	var names []string
+	teams.ElementsAs(ctx, &names, false) //nolint:errcheck
+	if len(names) == 0 {
+		return nil
+	}
+	tags := make([]string, len(names))
+	for i, n := range names {
+		tags[i] = "team:" + n
+	}
+	return tags
+}
+
+// tagsToTeamNames filters a raw AdditionalProperties tags value for "team:"-prefixed entries
+// and returns the bare team names. Returns nil when no team tags are present.
+func tagsToTeamNames(raw interface{}) []string {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var all []string
+	if err := json.Unmarshal(b, &all); err != nil {
+		return nil
+	}
+	var teams []string
+	for _, t := range all {
+		if strings.HasPrefix(t, "team:") {
+			teams = append(teams, strings.TrimPrefix(t, "team:"))
+		}
+	}
+	return teams
 }

@@ -1,4 +1,4 @@
-module github.com/nguyenanhducs/terraform-provider-datadog-notebook
+module github.com/nguyenanhducs/terraform-provider-datadoggy
 
 go 1.25.5
 

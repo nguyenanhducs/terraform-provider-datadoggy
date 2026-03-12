@@ -108,14 +108,14 @@ func TestAccNotebookResource_withTeams(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccNotebookResourceConfigWithTeams([]string{"team:sre"}),
+				Config: testAccNotebookResourceConfigWithTeams([]string{"sre"}),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("datadoggy_notebook.test", "id"),
 					resource.TestCheckResourceAttr("datadoggy_notebook.test", "teams.#", "1"),
 				),
 			},
 			{
-				Config: testAccNotebookResourceConfigWithTeams([]string{"team:sre", "team:platform"}),
+				Config: testAccNotebookResourceConfigWithTeams([]string{"sre", "platform"}),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("datadoggy_notebook.test", "id"),
 					resource.TestCheckResourceAttr("datadoggy_notebook.test", "teams.#", "2"),
@@ -126,9 +126,9 @@ func TestAccNotebookResource_withTeams(t *testing.T) {
 }
 
 func testAccNotebookResourceConfigWithTeams(teams []string) string {
-	teamsStr := `["team:sre"]`
+	teamsStr := `["sre"]`
 	if len(teams) == 2 {
-		teamsStr = `["team:sre", "team:platform"]`
+		teamsStr = `["sre", "platform"]`
 	}
 	return fmt.Sprintf(`%s
 resource "datadoggy_notebook" "test" {
@@ -284,25 +284,4 @@ resource "datadoggy_notebook" "test" {
   time  = { live_span = "1h" }
 }
 `, providerBlock(), nbType)
-}
-
-// TestAccNotebookResource_import tests import functionality (US3).
-func TestAccNotebookResource_import(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccNotebookResourceConfigBasic("Test Notebook Import"),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttrSet("datadoggy_notebook.test", "id"),
-				),
-			},
-			{
-				ResourceName:      "datadoggy_notebook.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-		},
-	})
 }
