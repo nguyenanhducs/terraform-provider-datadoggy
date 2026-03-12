@@ -1,11 +1,9 @@
-// Copyright IBM Corp. 2021, 2025
-// SPDX-License-Identifier: MPL-2.0
-
-// Package provider implements the Datadog Terraform provider.
 package provider
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -106,22 +104,50 @@ func (p *DatadogProvider) Configure(ctx context.Context, req provider.ConfigureR
 		apiURL = "https://api.datadoghq.com"
 	}
 
-	// Prepend https:// if no scheme is present (e.g. DD_HOST="us3.datadoghq.com").
-	if !strings.HasPrefix(apiURL, "http://") && !strings.HasPrefix(apiURL, "https://") {
+	// Prepend https:// only when no scheme is present (e.g. DD_HOST="us3.datadoghq.com").
+	// If a scheme other than http/https is present, the validation below will reject it.
+	if !strings.Contains(apiURL, "://") {
 		apiURL = "https://api." + apiURL
 	}
 
-	// Strip trailing slash so the SDK path does not produce double slashes.
-	apiURL = strings.TrimRight(apiURL, "/")
+	// Validate api_url structure: parse the URL, require http/https scheme and non-empty host.
+	// This catches typos like "ftp://..." or "https://" before they produce cryptic API errors.
+	parsedURL, parseErr := url.Parse(apiURL)
+	if parseErr != nil {
+		resp.Diagnostics.AddError(
+			"Invalid api_url",
+			fmt.Sprintf("api_url could not be parsed as a URL: %s", parseErr),
+		)
+		return
+	}
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "http" && scheme != "https" {
+		resp.Diagnostics.AddError(
+			"Invalid api_url",
+			fmt.Sprintf("api_url must use http or https scheme; got %q", parsedURL.Scheme),
+		)
+		return
+	}
+	if parsedURL.Host == "" {
+		resp.Diagnostics.AddError(
+			"Invalid api_url",
+			"api_url must include a non-empty host (e.g. https://api.datadoghq.com)",
+		)
+		return
+	}
 
-	// Validate api_url does not end with /api/.
-	if strings.HasSuffix(apiURL, "/api/") {
+	// Validate api_url does not end with /api/ before stripping the trailing slash,
+	// since TrimRight would remove the slash and defeat the check.
+	if strings.HasSuffix(apiURL, "/api/") || strings.HasSuffix(apiURL, "/api") {
 		resp.Diagnostics.AddError(
 			"Invalid api_url",
 			"api_url must not end with /api/; use https://api.datadoghq.com instead",
 		)
 		return
 	}
+
+	// Strip trailing slash so the SDK path does not produce double slashes.
+	apiURL = strings.TrimRight(apiURL, "/")
 
 	// Build the Datadog SDK configuration.
 	configuration := datadog.NewConfiguration()
