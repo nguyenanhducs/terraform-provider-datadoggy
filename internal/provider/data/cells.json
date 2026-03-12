@@ -1,0 +1,384 @@
+[
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "iframe",
+        "url": "https://example.com/dashboard"
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "manage_status",
+        "query": "service:$service",
+        "sort": "status,asc",
+        "count": 50,
+        "start": 0,
+        "display_format": "countsAndList",
+        "color_preference": "text",
+        "hide_zero_counts": true,
+        "show_last_triggered": false,
+        "summary_type": "combined",
+        "show_priority": true,
+        "title": "Service Status",
+        "title_size": "16",
+        "title_align": "left"
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Overview\n\nThis notebook provides an overview of the service."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "line",
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "avg:system.cpu.user{$env} by {host}"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "dog_classic",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "title": "CPU Usage",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Latency\n\nP99 latency for the service."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "line",
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "avg:trace.web.request.duration.by.service.99p{$env} by {service}"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "dog_classic",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "title": "P99 Latency",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Error Rate\n\nError rate for the service."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "bars",
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:trace.web.request.errors{$env} by {service}.as_count()"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "warm",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "title": "Error Count",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Throughput\n\nRequest throughput for the service."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "line",
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:trace.web.request.hits{$env} by {service}.as_rate()"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "cool",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "title": "Request Rate",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "sunburst",
+        "requests": [
+          {
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:trace.web.request.hits{$env} by {service}",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "response_format": "scalar",
+            "style": {
+              "palette": "datadog16"
+            }
+          }
+        ],
+        "title": "Requests by Service",
+        "legend": {
+          "type": "automatic"
+        }
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Infrastructure\n\nHost-level metrics."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "line",
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "avg:system.mem.used{$env} by {host}"
+              }
+            ],
+            "response_format": "timeseries",
+            "style": {
+              "palette": "dog_classic",
+              "line_type": "solid",
+              "line_width": "normal"
+            }
+          }
+        ],
+        "title": "Memory Usage",
+        "title_size": "16",
+        "title_align": "left",
+        "show_legend": true
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "sunburst",
+        "requests": [
+          {
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:trace.web.request.errors{$env} by {service}",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "response_format": "scalar",
+            "style": {
+              "palette": "warm"
+            }
+          }
+        ],
+        "title": "Errors by Service",
+        "legend": {
+          "type": "table"
+        }
+      },
+      "graph_size": "xl"
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Resource Breakdown\n\nBreakdown of resource usage by host."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "treemap",
+        "requests": [
+          {
+            "queries": [
+              {
+                "name": "q1",
+                "data_source": "metrics",
+                "query": "sum:system.disk.used{$env} by {host}",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "q1"
+              }
+            ],
+            "response_format": "scalar"
+          }
+        ]
+      },
+      "graph_size": "xl",
+      "time": {
+        "live_span": "1w"
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "markdown",
+        "text": "# Status Summary\n\nOverall health of the service."
+      }
+    }
+  },
+  {
+    "type": "notebook_cells",
+    "attributes": {
+      "definition": {
+        "type": "sunburst",
+        "requests": [
+          {
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:system.cpu.user{$env} by {host}",
+                "aggregator": "sum"
+              }
+            ],
+            "formulas": [
+              {
+                "formula": "query1"
+              }
+            ],
+            "response_format": "scalar",
+            "style": {
+              "palette": "cool"
+            }
+          }
+        ],
+        "title": "CPU by Host",
+        "legend": {
+          "type": "automatic"
+        }
+      },
+      "graph_size": "xl"
+    }
+  }
+]
