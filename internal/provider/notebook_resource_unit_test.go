@@ -52,11 +52,11 @@ func TestNewNotebookResource(t *testing.T) {
 
 func TestNotebookResourceMetadata(t *testing.T) {
 	r := &NotebookResource{}
-	req := resource.MetadataRequest{ProviderTypeName: "datadoggy"}
+	req := resource.MetadataRequest{ProviderTypeName: "datadoggo"}
 	resp := &resource.MetadataResponse{}
 	r.Metadata(context.Background(), req, resp)
-	if resp.TypeName != "datadoggy_notebook" {
-		t.Errorf("expected type name 'datadoggy_notebook', got %q", resp.TypeName)
+	if resp.TypeName != "datadoggo_notebook" {
+		t.Errorf("expected type name 'datadoggo_notebook', got %q", resp.TypeName)
 	}
 }
 

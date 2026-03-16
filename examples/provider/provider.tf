@@ -1,11 +1,11 @@
 terraform {
   required_providers {
-    datadoggy = {
-      source = "nguyenanhducs/datadoggy"
+    datadoggo = {
+      source = "nguyenanhducs/datadoggo"
     }
   }
 }
 
-provider "datadoggy" {
+provider "datadoggo" {
   # Configuration options
 }

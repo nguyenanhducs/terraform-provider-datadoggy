@@ -1,4 +1,4 @@
-module github.com/nguyenanhducs/terraform-provider-datadoggy
+module github.com/nguyenanhducs/terraform-provider-datadoggo
 
 go 1.25.5
 
