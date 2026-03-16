@@ -9,7 +9,7 @@ import (
 	"log"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/nguyenanhducs/terraform-provider-datadoggy/internal/provider"
+	"github.com/nguyenanhducs/terraform-provider-datadoggo/internal/provider"
 )
 
 // version is overwritten at release time by goreleaser via -X main.version={{.Version}}.
@@ -22,7 +22,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/nguyenanhducs/datadoggy",
+		Address: "registry.terraform.io/nguyenanhducs/datadoggo",
 		Debug:   debug,
 	}
 

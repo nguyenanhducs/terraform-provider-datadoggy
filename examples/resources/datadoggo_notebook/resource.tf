@@ -1,4 +1,4 @@
-resource "datadoggy_notebook" "example" {
+resource "datadoggo_notebook" "example" {
   name = "Example Service Runbook"
   type = "runbook"
   template_variables = [
@@ -58,5 +58,5 @@ resource "datadoggy_notebook" "example" {
 }
 
 output "notebook_id" {
-  value = datadoggy_notebook.example.id
+  value = datadoggo_notebook.example.id
 }
