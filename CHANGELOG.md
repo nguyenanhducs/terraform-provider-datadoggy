@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/nguyenanhducs/terraform-provider-datadoggy/compare/v0.1.3...v0.1.4) (2026-03-16)
+
+
+### Features
+
+* rebrand provider from datadoggy to datadoggo ([#30](https://github.com/nguyenanhducs/terraform-provider-datadoggy/issues/30)) ([d343d3a](https://github.com/nguyenanhducs/terraform-provider-datadoggy/commit/d343d3a8971c068d8c4fdbad2f395dab6a4b3873))
+
 ## [0.1.3](https://github.com/nguyenanhducs/terraform-provider-datadoggo/compare/v0.1.2...v0.1.3) (2026-03-12)
 
 
