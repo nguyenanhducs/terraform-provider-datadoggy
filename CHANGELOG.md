@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/nguyenanhducs/terraform-provider-datadoggo/compare/v0.1.4...v0.1.5) (2026-04-09)
+
+
+### Bug Fixes
+
+* resolve all bugs identified in security and correctness review ([#34](https://github.com/nguyenanhducs/terraform-provider-datadoggo/issues/34)) ([9387f89](https://github.com/nguyenanhducs/terraform-provider-datadoggo/commit/9387f8996bcf25d433c712a63987fe0d97fdba6f))
+
 ## [0.1.4](https://github.com/nguyenanhducs/terraform-provider-datadoggy/compare/v0.1.3...v0.1.4) (2026-03-16)
 
 
