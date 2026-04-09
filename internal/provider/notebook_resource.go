@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataDog/datadog-api-client-go/v2/api/datadog"
 	datadogV1 "github.com/DataDog/datadog-api-client-go/v2/api/datadogV1"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -26,6 +27,7 @@ import (
 var _ resource.Resource = &NotebookResource{}
 var _ resource.ResourceWithConfigure = &NotebookResource{}
 var _ resource.ResourceWithConfigValidators = &NotebookResource{}
+var _ resource.ResourceWithImportState = &NotebookResource{}
 
 // NewNotebookResource returns a new NotebookResource.
 func NewNotebookResource() resource.Resource {
@@ -35,7 +37,7 @@ func NewNotebookResource() resource.Resource {
 // NotebookResource manages Datadog Notebook resources.
 type NotebookResource struct {
 	notebooksAPI *datadogV1.NotebooksApi
-	apiCtx       context.Context
+	apiKeys      map[string]datadog.APIKey
 }
 
 // NotebookResourceModel is the Terraform state model for a datadog_notebook resource.
@@ -258,7 +260,7 @@ func (r *NotebookResource) Configure(_ context.Context, req resource.ConfigureRe
 		return
 	}
 	r.notebooksAPI = clients.NotebooksAPI
-	r.apiCtx = clients.APIContext
+	r.apiKeys = clients.APIKeys
 }
 
 // Create creates a new Datadog Notebook.
@@ -312,7 +314,14 @@ func (r *NotebookResource) Create(ctx context.Context, req resource.CreateReques
 	createData := datadogV1.NewNotebookCreateData(*attrs, datadogV1.NOTEBOOKRESOURCETYPE_NOTEBOOKS)
 	body := datadogV1.NewNotebookCreateRequest(*createData)
 
-	notebookResp, httpResp, err := r.notebooksAPI.CreateNotebook(r.apiCtx, *body)
+	apiCtx := context.WithValue(ctx, datadog.ContextAPIKeys, r.apiKeys)
+	var notebookResp datadogV1.NotebookResponse
+	httpResp, err := callWithRetry(ctx, func() (*http.Response, error) {
+		var hr *http.Response
+		var e error
+		notebookResp, hr, e = r.notebooksAPI.CreateNotebook(apiCtx, *body)
+		return hr, e
+	})
 	if err != nil {
 		detail := err.Error()
 		if httpResp != nil {
@@ -352,7 +361,14 @@ func (r *NotebookResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	notebookResp, httpResp, err := r.notebooksAPI.GetNotebook(r.apiCtx, notebookID)
+	apiCtx := context.WithValue(ctx, datadog.ContextAPIKeys, r.apiKeys)
+	var notebookResp datadogV1.NotebookResponse
+	httpResp, err := callWithRetry(ctx, func() (*http.Response, error) {
+		var hr *http.Response
+		var e error
+		notebookResp, hr, e = r.notebooksAPI.GetNotebook(apiCtx, notebookID)
+		return hr, e
+	})
 	if err != nil {
 		if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
 			resp.State.RemoveResource(ctx)
@@ -439,8 +455,19 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 	updateData := datadogV1.NewNotebookUpdateData(*attrs, datadogV1.NOTEBOOKRESOURCETYPE_NOTEBOOKS)
 	body := datadogV1.NewNotebookUpdateRequest(*updateData)
 
-	notebookResp, _, err := r.notebooksAPI.UpdateNotebook(r.apiCtx, notebookID, *body)
+	apiCtx := context.WithValue(ctx, datadog.ContextAPIKeys, r.apiKeys)
+	var notebookResp datadogV1.NotebookResponse
+	httpResp, err := callWithRetry(ctx, func() (*http.Response, error) {
+		var hr *http.Response
+		var e error
+		notebookResp, hr, e = r.notebooksAPI.UpdateNotebook(apiCtx, notebookID, *body)
+		return hr, e
+	})
 	if err != nil {
+		if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error updating notebook", err.Error())
 		return
 	}
@@ -470,7 +497,13 @@ func (r *NotebookResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	httpResp, err := r.notebooksAPI.DeleteNotebook(r.apiCtx, notebookID)
+	apiCtx := context.WithValue(ctx, datadog.ContextAPIKeys, r.apiKeys)
+	httpResp, err := callWithRetry(ctx, func() (*http.Response, error) {
+		var hr *http.Response
+		var e error
+		hr, e = r.notebooksAPI.DeleteNotebook(apiCtx, notebookID)
+		return hr, e
+	})
 	if err != nil {
 		if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
 			return
@@ -478,6 +511,76 @@ func (r *NotebookResource) Delete(ctx context.Context, req resource.DeleteReques
 		resp.Diagnostics.AddError("Error deleting notebook", err.Error())
 		return
 	}
+}
+
+// ImportState maps a Datadog Notebook ID to Terraform state, enabling `terraform import`.
+func (r *NotebookResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// --- Retry helpers ---
+
+// apiMaxAttempts is the maximum number of attempts for each API call.
+const apiMaxAttempts = 3
+
+// callWithRetry executes fn up to apiMaxAttempts times, retrying on 429 and 503.
+// The typed API response is captured by fn via closure.
+func callWithRetry(ctx context.Context, fn func() (*http.Response, error)) (*http.Response, error) {
+	var (
+		httpResp *http.Response
+		err      error
+		backoff  = 2 * time.Second
+	)
+	for attempt := 0; attempt < apiMaxAttempts; attempt++ {
+		httpResp, err = fn()
+		if err == nil {
+			return httpResp, nil
+		}
+		if !isRetryableStatus(httpResp) {
+			return httpResp, err
+		}
+		if attempt == apiMaxAttempts-1 {
+			break
+		}
+		wait := retryWait(httpResp, backoff)
+		backoff *= 2
+		select {
+		case <-ctx.Done():
+			return httpResp, fmt.Errorf("operation cancelled during retry: %w", ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+	return httpResp, err
+}
+
+// isRetryableStatus reports whether an HTTP response status warrants a retry.
+// A nil response (network-level error) is also retryable.
+func isRetryableStatus(httpResp *http.Response) bool {
+	if httpResp == nil {
+		return true
+	}
+	return httpResp.StatusCode == http.StatusTooManyRequests ||
+		httpResp.StatusCode == http.StatusServiceUnavailable
+}
+
+// retryWait returns the duration to wait before the next retry attempt.
+// For 429 responses it honours the X-RateLimit-Reset and Retry-After headers.
+func retryWait(httpResp *http.Response, defaultDelay time.Duration) time.Duration {
+	if httpResp != nil && httpResp.StatusCode == http.StatusTooManyRequests {
+		if reset := httpResp.Header.Get("X-RateLimit-Reset"); reset != "" {
+			if ts, err := strconv.ParseInt(reset, 10, 64); err == nil {
+				if wait := time.Until(time.Unix(ts, 0)); wait > 0 {
+					return wait
+				}
+			}
+		}
+		if ra := httpResp.Header.Get("Retry-After"); ra != "" {
+			if secs, err := strconv.ParseInt(ra, 10, 64); err == nil {
+				return time.Duration(secs) * time.Second
+			}
+		}
+	}
+	return defaultDelay
 }
 
 // --- Helper functions ---
@@ -805,18 +908,23 @@ func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDat
 
 	// Map metadata.
 	if meta, ok := attrs.GetMetadataOk(); ok && meta != nil {
-		if !meta.Type.IsSet() || meta.Type.Get() == nil {
-			data.Type = types.StringNull()
-		} else {
+		// Only overwrite type when the API returns one; otherwise preserve prior state
+		// to avoid clearing a type the user configured but the API didn't echo back.
+		if meta.Type.IsSet() && meta.Type.Get() != nil {
 			data.Type = types.StringValue(string(meta.GetType()))
 		}
-		// Only propagate is_template/take_snapshots when explicitly true, to
-		// avoid replacing a null plan value with the API default of false.
-		if meta.IsTemplate != nil && *meta.IsTemplate {
-			data.IsTemplate = types.BoolValue(true)
+		// Write is_template/take_snapshots when API returns a value, but preserve null
+		// when the prior state was null and the API returns the default of false — this
+		// avoids a spurious diff for users who omit these optional fields.
+		if meta.IsTemplate != nil {
+			if *meta.IsTemplate || !data.IsTemplate.IsNull() {
+				data.IsTemplate = types.BoolValue(*meta.IsTemplate)
+			}
 		}
-		if meta.TakeSnapshots != nil && *meta.TakeSnapshots {
-			data.TakeSnapshots = types.BoolValue(true)
+		if meta.TakeSnapshots != nil {
+			if *meta.TakeSnapshots || !data.TakeSnapshots.IsNull() {
+				data.TakeSnapshots = types.BoolValue(*meta.TakeSnapshots)
+			}
 		}
 	}
 

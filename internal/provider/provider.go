@@ -37,8 +37,9 @@ type DatadogProviderModel struct {
 
 // DatadogClients holds the authenticated Datadog API clients passed to resources.
 type DatadogClients struct {
-	NotebooksAPI *datadogV1.NotebooksApi
-	APIContext   context.Context
+	NotebooksAPI      *datadogV1.NotebooksApi
+	AuthenticationAPI *datadogV1.AuthenticationApi
+	APIKeys           map[string]datadog.APIKey
 }
 
 // Metadata returns the provider type name and version.
@@ -156,19 +157,27 @@ func (p *DatadogProvider) Configure(ctx context.Context, req provider.ConfigureR
 	}
 	apiClient := datadog.NewAPIClient(configuration)
 
-	// Inject auth keys into a background context so it outlives the Configure call.
-	authCtx := context.WithValue(
-		context.Background(),
-		datadog.ContextAPIKeys,
-		map[string]datadog.APIKey{
-			"apiKeyAuth": {Key: apiKey},
-			"appKeyAuth": {Key: appKey},
-		},
-	)
+	apiKeys := map[string]datadog.APIKey{
+		"apiKeyAuth": {Key: apiKey},
+		"appKeyAuth": {Key: appKey},
+	}
 
 	clients := &DatadogClients{
-		NotebooksAPI: datadogV1.NewNotebooksApi(apiClient),
-		APIContext:   authCtx,
+		NotebooksAPI:      datadogV1.NewNotebooksApi(apiClient),
+		AuthenticationAPI: datadogV1.NewAuthenticationApi(apiClient),
+		APIKeys:           apiKeys,
+	}
+
+	// Validate credentials when validate is true or not explicitly set to false.
+	if data.Validate.IsNull() || data.Validate.ValueBool() {
+		authCtx := context.WithValue(ctx, datadog.ContextAPIKeys, apiKeys)
+		if _, _, err := clients.AuthenticationAPI.Validate(authCtx); err != nil {
+			resp.Diagnostics.AddError(
+				"Credential validation failed",
+				fmt.Sprintf("Failed to validate Datadog credentials: %s. Set validate = false to skip.", err),
+			)
+			return
+		}
 	}
 
 	resp.DataSourceData = clients

@@ -3,10 +3,13 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/DataDog/datadog-api-client-go/v2/api/datadog"
 	datadogV1 "github.com/DataDog/datadog-api-client-go/v2/api/datadogV1"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -197,7 +200,7 @@ func TestNotebookResourceConfigureNil(t *testing.T) {
 
 func TestNotebookResourceConfigureValid(t *testing.T) {
 	r := &NotebookResource{}
-	clients := &DatadogClients{APIContext: context.Background()}
+	clients := &DatadogClients{APIKeys: map[string]datadog.APIKey{}}
 	req := resource.ConfigureRequest{ProviderData: clients}
 	resp := &resource.ConfigureResponse{}
 	r.Configure(context.Background(), req, resp)
@@ -1430,5 +1433,197 @@ func TestTeamsToTagSliceElementsAsError(t *testing.T) {
 	}
 	if tags != nil {
 		t.Errorf("expected nil tags on error, got %v", tags)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ImportState
+// ---------------------------------------------------------------------------
+
+func TestNotebookResourceImportState(t *testing.T) {
+	// The compile-time assertion var _ resource.ResourceWithImportState = &NotebookResource{}
+	// already guarantees the interface is satisfied. This test documents the expectation.
+	_ = resource.ResourceWithImportState(&NotebookResource{})
+}
+
+// ---------------------------------------------------------------------------
+// isRetryableStatus / retryWait / callWithRetry
+// ---------------------------------------------------------------------------
+
+func TestIsRetryableStatus_nilResponse(t *testing.T) {
+	if !isRetryableStatus(nil) {
+		t.Error("expected nil response (network error) to be retryable")
+	}
+}
+
+func TestIsRetryableStatus_429(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusTooManyRequests}
+	if !isRetryableStatus(resp) {
+		t.Error("expected 429 to be retryable")
+	}
+}
+
+func TestIsRetryableStatus_503(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusServiceUnavailable}
+	if !isRetryableStatus(resp) {
+		t.Error("expected 503 to be retryable")
+	}
+}
+
+func TestIsRetryableStatus_404(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusNotFound}
+	if isRetryableStatus(resp) {
+		t.Error("expected 404 to NOT be retryable")
+	}
+}
+
+func TestRetryWait_defaultDelay(t *testing.T) {
+	delay := 3 * time.Second
+	got := retryWait(nil, delay)
+	if got != delay {
+		t.Errorf("expected default delay %v for nil response, got %v", delay, got)
+	}
+}
+
+func TestRetryWait_retryAfterHeader(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"5"}},
+	}
+	got := retryWait(resp, time.Second)
+	if got != 5*time.Second {
+		t.Errorf("expected 5s from Retry-After header, got %v", got)
+	}
+}
+
+func TestRetryWait_nonRetryableUsesDefault(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Header:     http.Header{},
+	}
+	delay := 2 * time.Second
+	got := retryWait(resp, delay)
+	if got != delay {
+		t.Errorf("expected default delay %v for 503 without headers, got %v", delay, got)
+	}
+}
+
+func TestCallWithRetry_successOnFirstAttempt(t *testing.T) {
+	calls := 0
+	httpResp, err := callWithRetry(context.Background(), func() (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusOK}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if httpResp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", httpResp.StatusCode)
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 call, got %d", calls)
+	}
+}
+
+func TestCallWithRetry_doesNotRetryOn404(t *testing.T) {
+	calls := 0
+	_, err := callWithRetry(context.Background(), func() (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusNotFound}, fmt.Errorf("not found")
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (no retry for 404), got %d", calls)
+	}
+}
+
+func TestCallWithRetry_contextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	_, err := callWithRetry(ctx, func() (*http.Response, error) {
+		calls++
+		cancel() // cancel after first call
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{},
+		}, fmt.Errorf("service unavailable")
+	})
+	if err == nil {
+		t.Fatal("expected error after context cancellation")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// mapResponseToModel — is_template/take_snapshots true→false fix
+// ---------------------------------------------------------------------------
+
+func TestMapResponseToModel_isTemplateFalseWrittenWhenPriorStateNotNull(t *testing.T) {
+	ctx := context.Background()
+	isTemplate := false
+	meta := datadogV1.NotebookMetadata{}
+	meta.SetIsTemplate(isTemplate)
+
+	attrs := datadogV1.NotebookResponseDataAttributes{
+		Name:     "Test",
+		Cells:    []datadogV1.NotebookCellResponse{},
+		Time:     datadogV1.NotebookRelativeTimeAsNotebookGlobalTime(datadogV1.NewNotebookRelativeTime(datadogV1.WIDGETLIVESPAN_PAST_ONE_HOUR)),
+		Metadata: &meta,
+	}
+	// Prior state has is_template = true → should be overwritten with false
+	data := &NotebookResourceModel{IsTemplate: types.BoolValue(true)}
+	mapResponseToModel(ctx, attrs, data)
+
+	if data.IsTemplate.IsNull() {
+		t.Fatal("expected is_template to be set (not null)")
+	}
+	if data.IsTemplate.ValueBool() {
+		t.Error("expected is_template to be false after API returned false")
+	}
+}
+
+func TestMapResponseToModel_isTemplateNullPreservedWhenAPIReturnsFalse(t *testing.T) {
+	ctx := context.Background()
+	isTemplate := false
+	meta := datadogV1.NotebookMetadata{}
+	meta.SetIsTemplate(isTemplate)
+
+	attrs := datadogV1.NotebookResponseDataAttributes{
+		Name:     "Test",
+		Cells:    []datadogV1.NotebookCellResponse{},
+		Time:     datadogV1.NotebookRelativeTimeAsNotebookGlobalTime(datadogV1.NewNotebookRelativeTime(datadogV1.WIDGETLIVESPAN_PAST_ONE_HOUR)),
+		Metadata: &meta,
+	}
+	// Prior state has is_template = null (user never set it) → should stay null
+	data := &NotebookResourceModel{IsTemplate: types.BoolNull()}
+	mapResponseToModel(ctx, attrs, data)
+
+	if !data.IsTemplate.IsNull() {
+		t.Errorf("expected is_template to remain null when prior state was null and API returned false, got %v", data.IsTemplate.ValueBool())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// mapResponseToModel — type field preservation fix
+// ---------------------------------------------------------------------------
+
+func TestMapResponseToModel_typePreservedWhenAPIReturnsNoType(t *testing.T) {
+	ctx := context.Background()
+	// Metadata is present but has no type set
+	meta := datadogV1.NotebookMetadata{}
+
+	attrs := datadogV1.NotebookResponseDataAttributes{
+		Name:     "Test",
+		Cells:    []datadogV1.NotebookCellResponse{},
+		Time:     datadogV1.NotebookRelativeTimeAsNotebookGlobalTime(datadogV1.NewNotebookRelativeTime(datadogV1.WIDGETLIVESPAN_PAST_ONE_HOUR)),
+		Metadata: &meta,
+	}
+	// Prior state has type = "runbook" — should be preserved
+	data := &NotebookResourceModel{Type: types.StringValue("runbook")}
+	mapResponseToModel(ctx, attrs, data)
+
+	if data.Type.ValueString() != "runbook" {
+		t.Errorf("expected type 'runbook' preserved when API returns no type, got %q", data.Type.ValueString())
 	}
 }
