@@ -65,16 +65,16 @@ terraform import datadoggo_notebook.example <notebook_id>
 
 ## Environment variables
 
-| Variable     | Description                                           |
-|--------------|-------------------------------------------------------|
+| Variable     | Description                                          |
+| ------------ | ---------------------------------------------------- |
 | `DD_API_KEY` | Datadog API key (alternative to `api_key` in config) |
 | `DD_APP_KEY` | Datadog Application key (alternative to `app_key`)   |
 | `DD_HOST`    | Datadog API base URL, e.g. `us3.datadoghq.com`       |
 
 ## Resources
 
-| Resource           | Description                                    |
-|--------------------|------------------------------------------------|
-| `datadoggo_notebook` | Manages a Datadog Notebook (CRUD + import)     |
+| Resource             | Description                                |
+| -------------------- | ------------------------------------------ |
+| `datadoggo_notebook` | Manages a Datadog Notebook (CRUD + import) |
 
 See [`docs/resources/notebook.md`](docs/resources/notebook.md) for the full schema reference.

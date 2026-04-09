@@ -7,7 +7,9 @@ description: |-
 
 # Datadoggo Provider
 
-The official `DataDog/datadog` Terraform provider exposes most Datadog resources but omits the Notebooks. This provider implements the `datadoggo_notebook` resource so notebooks can be managed as infrastructure-as-code alongside the rest of your Datadog setup.
+The official `DataDog/datadog` Terraform provider exposes most Datadog resources but omits the Notebooks. See the upstream request in [DataDog/terraform-provider-datadog issue #261](https://github.com/DataDog/terraform-provider-datadog/issues/261).
+
+This provider implements the `datadoggo_notebook` resource so notebooks can be managed as infrastructure-as-code alongside the rest of your Datadog setup.
 
 ## Example Usage
 
