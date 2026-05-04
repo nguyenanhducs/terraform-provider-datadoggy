@@ -468,7 +468,13 @@ func (r *NotebookResource) Update(ctx context.Context, req resource.UpdateReques
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Error updating notebook", err.Error())
+		detail := err.Error()
+		if httpResp != nil {
+			if apiErr, ok := err.(interface{ Body() []byte }); ok {
+				detail = fmt.Sprintf("%s — API response: %s", err.Error(), apiErr.Body())
+			}
+		}
+		resp.Diagnostics.AddError("Error updating notebook", detail)
 		return
 	}
 
@@ -597,6 +603,7 @@ var graphSizeSupportedTypes = map[string]bool{
 	"heatmap":      true,
 	"distribution": true,
 	"log_stream":   true,
+	"list_stream":  true,
 }
 
 // splitBySupportedTypes lists definition.type values whose SDK attributes struct

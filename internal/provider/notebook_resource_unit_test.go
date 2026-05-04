@@ -1046,9 +1046,8 @@ func TestCellsFromJSON_graphSizeInsideAttributes(t *testing.T) {
 	}
 	ts := cells[0].Attributes.NotebookTimeseriesCellAttributes
 	if ts == nil {
-		t.Skip("SDK did not produce a timeseries cell — skipping graph_size attribute check")
-	}
-	if ts.GraphSize == nil {
+		t.Error("expected NotebookTimeseriesCellAttributes, got nil")
+	} else if ts.GraphSize == nil {
 		t.Error("expected GraphSize to be set in NotebookTimeseriesCellAttributes")
 	} else if string(*ts.GraphSize) != "xl" {
 		t.Errorf("expected GraphSize 'xl', got %q", string(*ts.GraphSize))
@@ -1067,9 +1066,8 @@ func TestCellsFromJSON_graphSizeAtTopLevelMovedToAttrs(t *testing.T) {
 	}
 	ts := cells[0].Attributes.NotebookTimeseriesCellAttributes
 	if ts == nil {
-		t.Skip("SDK did not produce a timeseries cell — skipping graph_size attribute check")
-	}
-	if ts.GraphSize == nil {
+		t.Error("expected NotebookTimeseriesCellAttributes, got nil")
+	} else if ts.GraphSize == nil {
 		t.Error("expected GraphSize to be set after moving from top level")
 	} else if string(*ts.GraphSize) != "xl" {
 		t.Errorf("expected GraphSize 'xl', got %q", string(*ts.GraphSize))
