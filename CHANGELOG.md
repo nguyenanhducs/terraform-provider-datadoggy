@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6](https://github.com/nguyenanhducs/terraform-provider-datadoggo/compare/v0.1.5...v0.1.6) (2026-05-04)
+
+
+### Bug Fixes
+
+* preserve explicit empty available_values through API round-trip ([#44](https://github.com/nguyenanhducs/terraform-provider-datadoggo/issues/44)) ([dc97cec](https://github.com/nguyenanhducs/terraform-provider-datadoggo/commit/dc97cec32ca8818e258e3dd31ad65993ef2a732b))
+* support graph_size for list_stream cells ([#43](https://github.com/nguyenanhducs/terraform-provider-datadoggo/issues/43)) ([c2ddf5b](https://github.com/nguyenanhducs/terraform-provider-datadoggo/commit/c2ddf5bcca1faeebcedb51f9ac79416f8b84c2be))
+
 ## [0.1.5](https://github.com/nguyenanhducs/terraform-provider-datadoggo/compare/v0.1.4...v0.1.5) (2026-04-09)
 
 
