@@ -639,6 +639,55 @@ func TestMapResponseToModelWithTemplateVariables(t *testing.T) {
 	}
 }
 
+// TestMapResponseToModel_emptyAvailableValuesPreserved verifies that when the plan has
+// available_values = [] (explicit empty list) and the API echoes back [], the state
+// preserves the empty list rather than converting it to null (which would produce
+// "was cty.ListValEmpty(cty.String), but now null" inconsistency errors).
+func TestMapResponseToModel_emptyAvailableValuesPreserved(t *testing.T) {
+	ctx := context.Background()
+	emptyList, _ := types.ListValueFrom(ctx, types.StringType, []string{})
+	attrs := datadogV1.NotebookResponseDataAttributes{
+		Name:  "Test",
+		Cells: []datadogV1.NotebookCellResponse{},
+		Time:  datadogV1.NotebookRelativeTimeAsNotebookGlobalTime(datadogV1.NewNotebookRelativeTime(datadogV1.WIDGETLIVESPAN_PAST_ONE_HOUR)),
+		AdditionalProperties: map[string]interface{}{
+			"template_variables": []interface{}{
+				map[string]interface{}{
+					"name":             "cluster",
+					"prefix":           "@cluster",
+					"default":          "*",
+					"available_values": []interface{}{},
+				},
+			},
+		},
+	}
+	// Simulate plan state where user set available_values = []
+	data := &NotebookResourceModel{
+		TemplateVariables: []TemplateVariableModel{
+			{
+				Name:            types.StringValue("cluster"),
+				Prefix:          types.StringValue("@cluster"),
+				Default:         types.StringValue("*"),
+				AvailableValues: emptyList,
+			},
+		},
+	}
+	mapResponseToModel(ctx, attrs, data)
+
+	if len(data.TemplateVariables) != 1 {
+		t.Fatalf("expected 1 template variable, got %d", len(data.TemplateVariables))
+	}
+	if data.TemplateVariables[0].AvailableValues.IsNull() {
+		t.Error("available_values should be empty list, not null — plan had explicit [] and API echoed []")
+	}
+	if data.TemplateVariables[0].AvailableValues.IsUnknown() {
+		t.Error("available_values should not be unknown")
+	}
+	if len(data.TemplateVariables[0].AvailableValues.Elements()) != 0 {
+		t.Errorf("expected 0 elements, got %d", len(data.TemplateVariables[0].AvailableValues.Elements()))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // teamsToTagSlice (T005)
 // ---------------------------------------------------------------------------

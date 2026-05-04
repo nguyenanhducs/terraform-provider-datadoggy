@@ -954,12 +954,21 @@ func mapResponseToModel(ctx context.Context, attrs datadogV1.NotebookResponseDat
 	// Map template_variables from AdditionalProperties; ignore empty list so a
 	// null plan value is not replaced with an empty list.
 	if tvRaw, ok := attrs.AdditionalProperties["template_variables"]; ok && tvRaw != nil {
+		priorTVs := data.TemplateVariables
 		tvs, d := parseTemplateVariables(ctx, tvRaw)
 		diags.Append(d...)
 		if diags.HasError() {
 			return diags
 		}
 		if len(tvs) > 0 {
+			// When parseTemplateVariables converts an API-echoed empty available_values to
+			// null, but the plan/state had an explicit empty list, restore the prior value
+			// so Terraform doesn't see a null-vs-[] inconsistency.
+			for i := range tvs {
+				if tvs[i].AvailableValues.IsNull() && i < len(priorTVs) && !priorTVs[i].AvailableValues.IsNull() {
+					tvs[i].AvailableValues = priorTVs[i].AvailableValues
+				}
+			}
 			data.TemplateVariables = tvs
 		}
 	}
